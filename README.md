@@ -8,6 +8,8 @@ The HTTP API, strict URL validation, direct LinkedIn HTTP client, React Flight e
 
 An authorized low-volume live smoke test passed on August 28, 2026. LinkedIn's private endpoints and response shapes can still change without notice, so live compatibility remains an operational concern rather than a permanent guarantee.
 
+Live HTTPS endpoint: [`https://tross-linkedin-profile-api-583248531894.asia-south1.run.app`](https://tross-linkedin-profile-api-583248531894.asia-south1.run.app). The profile route requires the bearer token supplied separately to the challenge reviewers; `/health` is public.
+
 ## Platform and data warning
 
 This project calls a private, reverse-engineered LinkedIn endpoint because that is an explicit requirement of the Tross hiring challenge. It is not an official LinkedIn integration. Use it only with an account and profile access you are authorized to use, at your own compliance and account risk.
@@ -120,6 +122,8 @@ docker run --rm -p 3000:3000 \
 ```
 
 Store all session values in the hosting platform's secret manager. Do not place them in build arguments, image layers, environment files committed to Git, or CI configuration.
+
+The reference deployment runs on Google Cloud Run with the LinkedIn session and API bearer token stored as separate Secret Manager secrets. The API token is intentionally absent from this public repository.
 
 ## Error contract
 

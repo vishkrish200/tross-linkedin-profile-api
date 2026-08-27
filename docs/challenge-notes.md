@@ -27,8 +27,8 @@ Tross emailed candidates to clarify that the LinkedIn solution must be purely re
 - [x] Docker packaging
 - [x] Setup, API, approach, and limitation documentation
 - [x] Authorized live-profile smoke test
-- [ ] Select hosting provider and deploy over HTTPS
-- [ ] Verify the deployed endpoint from outside the host
-- [ ] Create and review the public GitHub repository
-- [ ] Run repository and Git-history secret scans
+- [x] Select hosting provider and deploy over HTTPS
+- [x] Verify the deployed endpoint from outside the host
+- [x] Create and review the public GitHub repository
+- [x] Run repository and Git-history secret scans
 - [ ] Complete the Tross submission form
