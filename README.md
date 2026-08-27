@@ -1,18 +1,18 @@
 # LinkedIn Profile API
 
-A small TypeScript service that accepts a LinkedIn profile URL and returns the profile information visible to an authorized LinkedIn session as structured JSON.
+A small TypeScript service that accepts a LinkedIn profile URL and returns profile information visible to an authorized LinkedIn session as structured JSON.
 
 ## Status
 
-The API contract, input validation, HTML extraction, cache, rate limiting, session-secret handling, Docker packaging, and deterministic tests are implemented. A real LinkedIn session has deliberately not been connected or exercised yet.
+The HTTP API, strict URL validation, direct LinkedIn HTTP client, React Flight extraction, section pagination, cache, rate limiting, Docker packaging, and deterministic tests are implemented. The deployed application does not launch or depend on a browser.
 
-## Important platform limitation
+An authorized low-volume live smoke test passed on August 28, 2026. LinkedIn's private endpoints and response shapes can still change without notice, so live compatibility remains an operational concern rather than a permanent guarantee.
 
-LinkedIn's current User Agreement and help documentation prohibit third-party scraping and unauthorized browser automation. The official Profile API is restricted and generally does not provide arbitrary members' full profile data. Use this project only with explicit authorization and at your own account and compliance risk. It does not bypass access controls, CAPTCHAs, checkpoints, or rate limits.
+## Platform and data warning
 
-- [LinkedIn User Agreement, section 8.2](https://www.linkedin.com/legal/user-agreement)
-- [LinkedIn automated activity guidance](https://www.linkedin.com/help/linkedin/answer/a1340567/automated-activity-on-linkedin)
-- [Official LinkedIn Profile API documentation](https://learn.microsoft.com/en-us/linkedin/shared/integrations/people/profile-api)
+This project calls a private, reverse-engineered LinkedIn endpoint because that is an explicit requirement of the Tross hiring challenge. It is not an official LinkedIn integration. Use it only with an account and profile access you are authorized to use, at your own compliance and account risk.
+
+The service does not bypass authentication, checkpoints, CAPTCHAs, access controls, or rate limits. Profile data is personal data; a real production service requires an appropriate lawful basis, retention and deletion policies, access controls, and audit logging.
 
 ## API
 
@@ -22,8 +22,6 @@ Returns `{"status":"ok"}`.
 
 ### `POST /v1/profiles`
 
-Request:
-
 ```http
 POST /v1/profiles HTTP/1.1
 Content-Type: application/json
@@ -32,13 +30,13 @@ Authorization: Bearer <API_KEY>
 {"url":"https://www.linkedin.com/in/example-person/"}
 ```
 
-Response shape:
+Successful response:
 
 ```json
 {
   "data": {
     "sourceUrl": "https://www.linkedin.com/in/example-person/",
-    "fetchedAt": "2026-08-27T00:00:00.000Z",
+    "fetchedAt": "2026-08-28T00:00:00.000Z",
     "name": "Example Person",
     "headline": "Software Engineer",
     "location": "Bengaluru, India",
@@ -54,7 +52,17 @@ Response shape:
 }
 ```
 
-The endpoint accepts only HTTPS URLs on `linkedin.com` or `www.linkedin.com` whose path is exactly `/in/<profile-slug>`. This prevents the server from becoming a general-purpose URL fetcher.
+Only HTTPS URLs on `linkedin.com` or `www.linkedin.com` whose path is exactly `/in/<profile-slug>` are accepted. Query strings and fragments are removed before the provider is called.
+
+## How the direct provider works
+
+1. The public LinkedIn identifier is taken from the validated `/in/` URL.
+2. The provider fetches the profile page directly and reads LinkedIn's server-rendered React Flight data, including the transient profile identifier.
+3. It calls LinkedIn's private RSC pagination endpoint directly for experience, education, skills, certifications, and languages.
+4. The React Flight responses are resolved into the stable public schema.
+5. An authorized session cookie and CSRF token are supplied only through runtime secrets, and successful results are cached briefly to reduce upstream requests.
+
+No Playwright, Chromium, Selenium, or browser session is used by the application.
 
 ## Local setup
 
@@ -62,18 +70,17 @@ Prerequisites: Node.js 22 or newer.
 
 ```bash
 npm install
-npx playwright install chromium
 cp .env.example .env
 npm run check
 ```
 
-Create a local session by signing in manually in the browser window:
+Set these runtime values in `.env` using a session you are authorized to use:
 
-```bash
-npm run auth
-```
+- `LINKEDIN_COOKIE`: the minimum cookie header required by the authenticated LinkedIn requests, normally containing `li_at` and `JSESSIONID`.
+- `LINKEDIN_CSRF_TOKEN`: the CSRF value observed on the authorized request. It may be omitted when `JSESSIONID` is present because the provider derives its unquoted value.
+- `API_KEY`: a long random bearer token for callers of this API.
 
-This writes `.auth/linkedin.json`, which is ignored by Git. The service never accepts or persists a LinkedIn username or password.
+Do not paste these values into documentation, issue trackers, submission forms, logs, or source control. The service never accepts or stores a LinkedIn password.
 
 Start the service:
 
@@ -84,7 +91,7 @@ set +a
 npm run dev
 ```
 
-Then call it:
+Call it:
 
 ```bash
 curl -sS http://localhost:3000/v1/profiles \
@@ -93,42 +100,46 @@ curl -sS http://localhost:3000/v1/profiles \
   -d '{"url":"https://www.linkedin.com/in/example-person/"}'
 ```
 
+For a one-request local smoke test without starting the HTTP server:
+
+```bash
+PROFILE_URL=https://www.linkedin.com/in/example-person/ npm run smoke
+```
+
 ## Deployment
 
-Build and run the included container on a platform that supports Docker and HTTPS termination:
+Build and run the container behind an HTTPS-terminating platform:
 
 ```bash
 docker build -t linkedin-profile-api .
 docker run --rm -p 3000:3000 \
   -e API_KEY="$API_KEY" \
-  -e LINKEDIN_STORAGE_STATE_B64="$LINKEDIN_STORAGE_STATE_B64" \
+  -e LINKEDIN_COOKIE="$LINKEDIN_COOKIE" \
+  -e LINKEDIN_CSRF_TOKEN="$LINKEDIN_CSRF_TOKEN" \
   linkedin-profile-api
 ```
 
-For a hosted environment, base64-encode the contents of `.auth/linkedin.json` and store the result in the platform's secret manager as `LINKEDIN_STORAGE_STATE_B64`. Do not put it in source control, build arguments, image layers, logs, or the submission form.
+Store all session values in the hosting platform's secret manager. Do not place them in build arguments, image layers, environment files committed to Git, or CI configuration.
 
-## Approach
+## Error contract
 
-1. Validate and canonicalize the submitted URL before any network access.
-2. Load a manually created LinkedIn browser session from a runtime secret.
-3. Render the requested profile using Playwright without attempting to solve or bypass challenges.
-4. Convert visible profile sections into a stable response schema.
-5. Cache successful results briefly and rate-limit callers to reduce account and platform load.
-
-The provider is behind a small interface so the fetch mechanism can be replaced without changing the HTTP API or response schema.
-
-For component responsibilities and the request flow, see [`docs/architecture.md`](docs/architecture.md). The delivery checklist is in [`docs/challenge-notes.md`](docs/challenge-notes.md).
+- `400 invalid_request`: malformed body or non-profile URL.
+- `401 unauthorized`: invalid or absent API bearer token when `API_KEY` is configured.
+- `502 provider_authentication_failed`: LinkedIn rejected or redirected the runtime session.
+- `502 provider_fetch_failed`: upstream failure, rate limit, checkpoint signal, or unexpected response.
+- `503 provider_not_configured`: required LinkedIn runtime secrets are absent.
 
 ## Known limitations
 
-- LinkedIn's markup changes frequently; extraction selectors and heuristics will require maintenance.
-- Visibility depends on the supplied account, its relationship to the profile, region, privacy settings, and LinkedIn experiments.
-- Some profiles lazy-load sections that may not appear in the rendered page.
-- Session state expires and may trigger a login or checkpoint. The service returns an explicit upstream authentication error and does not bypass it.
-- The current implementation reads rendered HTML. A private, undocumented LinkedIn endpoint is not hard-coded because it is unstable and increases platform-policy risk.
-- The in-memory cache is per process and should be replaced with a shared cache for multi-instance deployments.
-- Profile data is personal data. A production service needs a lawful basis, retention policy, deletion process, access controls, and audit logging.
+- LinkedIn's private RSC endpoints can change paths, request contracts, component identifiers, and response schemas without notice.
+- Visibility depends on the supplied account, relationship, region, privacy settings, and LinkedIn experiments.
+- Session cookies expire and can trigger checkpoints.
+- Empty, private, or account-invisible fields are returned as empty arrays or omitted optional fields.
+- The cache is per process and is not shared across multiple instances.
+- Synthetic React Flight fixtures prove deterministic parsing; the dated live smoke test is the separate compatibility check.
+
+For component responsibilities, see [`docs/architecture.md`](docs/architecture.md). The delivery checklist is in [`docs/challenge-notes.md`](docs/challenge-notes.md).
 
 ## Repository hygiene
 
-The `.gitignore` excludes `.env`, `.auth/`, build output, reports, and dependencies. Before publishing, run a secret scan and inspect the complete Git history, not only the working tree.
+`.env`, dependencies, build output, reports, and temporary files are ignored. Before publishing, inspect the complete Git history and run a secret scanner over both the working tree and history.

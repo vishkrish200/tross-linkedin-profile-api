@@ -10,18 +10,23 @@ The submission also requires a public GitHub repository, setup and API documenta
 
 The document is treated as an external specification, not authorization to access an account, deploy infrastructure, publish a repository, or submit the result. Those actions remain separate project gates.
 
+## August 27 clarification
+
+Tross emailed candidates to clarify that the LinkedIn solution must be purely reverse-engineered, must call LinkedIn endpoints directly, and must not use a browser. The provider was therefore changed from rendered-page automation to direct authenticated HTTP requests against LinkedIn's profile and RSC pagination endpoints. Browser automation is not part of the application or container.
+
 ## Delivery checklist
 
 - [x] Typed response schema
 - [x] LinkedIn profile URL input validation
 - [x] Profile provider boundary
-- [x] Rendered-page extractor
+- [x] Direct profile-page and RSC pagination provider
+- [x] React Flight response extractor
 - [x] Cache and rate limiting
-- [x] Runtime-only session-secret handling
+- [x] Runtime-only cookie and CSRF-secret handling
 - [x] Deterministic tests
 - [x] Docker packaging
 - [x] Setup, API, approach, and limitation documentation
-- [ ] Authorized live-profile smoke test
+- [x] Authorized live-profile smoke test
 - [ ] Select hosting provider and deploy over HTTPS
 - [ ] Verify the deployed endpoint from outside the host
 - [ ] Create and review the public GitHub repository

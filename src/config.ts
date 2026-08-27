@@ -6,8 +6,10 @@ export type AppConfig = {
   cacheTtlMs: number;
   rateLimitMax: number;
   rateLimitWindow: string;
-  linkedinStorageStatePath?: string;
-  linkedinStorageStateBase64?: string;
+  linkedinCookie?: string;
+  linkedinCsrfToken?: string;
+  linkedinUserAgent?: string;
+  linkedinRequestTimeoutMs: number;
 };
 
 function positiveInteger(value: string | undefined, fallback: number): number {
@@ -24,11 +26,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cacheTtlMs: positiveInteger(env.CACHE_TTL_SECONDS, 900) * 1000,
     rateLimitMax: positiveInteger(env.RATE_LIMIT_MAX, 10),
     rateLimitWindow: env.RATE_LIMIT_WINDOW || "1 minute",
-    ...(env.LINKEDIN_STORAGE_STATE_PATH
-      ? { linkedinStorageStatePath: env.LINKEDIN_STORAGE_STATE_PATH }
-      : {}),
-    ...(env.LINKEDIN_STORAGE_STATE_B64
-      ? { linkedinStorageStateBase64: env.LINKEDIN_STORAGE_STATE_B64 }
-      : {}),
+    ...(env.LINKEDIN_COOKIE ? { linkedinCookie: env.LINKEDIN_COOKIE } : {}),
+    ...(env.LINKEDIN_CSRF_TOKEN ? { linkedinCsrfToken: env.LINKEDIN_CSRF_TOKEN } : {}),
+    ...(env.LINKEDIN_USER_AGENT ? { linkedinUserAgent: env.LINKEDIN_USER_AGENT } : {}),
+    linkedinRequestTimeoutMs: positiveInteger(env.LINKEDIN_REQUEST_TIMEOUT_MS, 20_000),
   };
 }

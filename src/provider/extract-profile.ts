@@ -1,5 +1,3 @@
-import * as cheerio from "cheerio";
-import type { AnyNode } from "domhandler";
 import type {
   Certification,
   Education,
@@ -8,188 +6,334 @@ import type {
   Profile,
 } from "../domain/profile.js";
 
-const whitespace = /\s+/g;
-const dateSignal = /\b(?:19|20)\d{2}\b|\bPresent\b|\b(?:yr|yrs|mo|mos)\b/i;
+type FlightRow = { id: string; values: string[] };
+
+export type LinkedInSection =
+  | "experience"
+  | "education"
+  | "skills"
+  | "certifications"
+  | "languages";
+
+export type LinkedInResponses = Record<LinkedInSection, string[]>;
+
+type Identity = {
+  profileId?: string;
+  name?: string;
+  headline?: string;
+  location?: string;
+  about?: string;
+  profileImages: string[];
+};
 
 function clean(value: string | undefined): string | undefined {
-  const normalized = value?.replace(whitespace, " ").trim();
+  const normalized = value?.replace(/\s+/g, " ").trim();
   return normalized || undefined;
 }
 
-function unique(values: Array<string | undefined>): string[] {
-  return [...new Set(values.map(clean).filter((value): value is string => Boolean(value)))];
-}
-
-function firstText($: cheerio.CheerioAPI, selectors: string[]): string | undefined {
-  for (const selector of selectors) {
-    const value = clean($(selector).first().text());
-    if (value) return value;
-  }
-  return undefined;
-}
-
-function section($: cheerio.CheerioAPI, id: string): cheerio.Cheerio<AnyNode> {
-  const anchor = $(`#${id}`).first();
-  if (!anchor.length) return $([]);
-  const parentSection = anchor.closest("section");
-  return parentSection.length ? parentSection : anchor.parent();
-}
-
-function itemLines($: cheerio.CheerioAPI, id: string): string[][] {
-  const root = section($, id);
-  if (!root.length) return [];
-
-  let items = root.find("li.pvs-list__paged-list-item, li.artdeco-list__item");
-  if (!items.length) items = root.find("li");
-
+function unique<T>(values: T[], key: (value: T) => string): T[] {
   const seen = new Set<string>();
-  const output: string[][] = [];
-  items.each((_, item) => {
-    const lines = unique(
-      $(item)
-        .text()
-        .split(/\r?\n/)
-        .map((line) => line.replace(/Show credential|See more/gi, "")),
-    );
-    const key = lines.join("|");
-    if (lines.length && !seen.has(key)) {
-      seen.add(key);
-      output.push(lines);
-    }
+  return values.filter((value) => {
+    const id = key(value);
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
   });
-  return output;
 }
 
-function parseExperience(lines: string[]): Experience | undefined {
-  const title = lines[0];
-  if (!title) return undefined;
-  const dateIndex = lines.findIndex((line, index) => index > 0 && dateSignal.test(line));
-  const companyLine = lines[1];
-  const [company, employmentType] = (companyLine ?? "").split(" · ").map(clean);
-  const location = dateIndex >= 0 ? clean(lines[dateIndex + 1]) : undefined;
-  const descriptionStart = dateIndex >= 0 ? dateIndex + (location ? 2 : 1) : 2;
-  const description = clean(lines.slice(descriptionStart).join(" "));
-  return {
-    title,
-    ...(company ? { company } : {}),
-    ...(employmentType ? { employmentType } : {}),
-    ...(dateIndex >= 0 && lines[dateIndex] ? { dateRange: lines[dateIndex] } : {}),
-    ...(location ? { location } : {}),
-    ...(description ? { description } : {}),
-  };
+function flightStreams(input: string): string[] {
+  const script = /<script[^>]+id=["']rehydrate-data["'][^>]*>([\s\S]*?)<\/script>/i.exec(input)?.[1];
+  if (!script) return [input];
+  const assignment = /^\s*window\.__como_rehydration__\s*=\s*([\s\S]*?)\s*;?\s*$/.exec(script)?.[1];
+  if (!assignment) return [];
+  try {
+    const parsed = JSON.parse(assignment) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
-function parseEducation(lines: string[]): Education | undefined {
-  const school = lines[0];
-  if (!school) return undefined;
-  const dateIndex = lines.findIndex((line, index) => index > 0 && dateSignal.test(line));
-  const degreeLine = dateIndex === 2 ? lines[1] : undefined;
-  const [degree, fieldOfStudy] = (degreeLine ?? "").split(", ").map(clean);
-  const description = clean(lines.slice(dateIndex >= 0 ? dateIndex + 1 : 2).join(" "));
-  return {
-    school,
-    ...(degree ? { degree } : {}),
-    ...(fieldOfStudy ? { fieldOfStudy } : {}),
-    ...(dateIndex >= 0 && lines[dateIndex] ? { dateRange: lines[dateIndex] } : {}),
-    ...(description ? { description } : {}),
-  };
-}
-
-function parseCertification(lines: string[], href?: string): Certification | undefined {
-  const name = lines[0];
-  if (!name) return undefined;
-  const issued = lines.find((line) => /^Issued\b/i.test(line));
-  const credentialId = lines.find((line) => /^Credential ID\b/i.test(line));
-  return {
-    name,
-    ...(lines[1] ? { issuer: lines[1] } : {}),
-    ...(issued ? { issued } : {}),
-    ...(credentialId ? { credentialId } : {}),
-    ...(href?.startsWith("http") ? { credentialUrl: href } : {}),
-  };
-}
-
-function parseLanguage(lines: string[]): Language | undefined {
-  const name = lines[0];
-  if (!name) return undefined;
-  return { name, ...(lines[1] ? { proficiency: lines[1] } : {}) };
-}
-
-function aboutText($: cheerio.CheerioAPI): string | undefined {
-  const root = section($, "about");
-  if (!root.length) return undefined;
-  const preferred = clean(root.find(".inline-show-more-text").first().text());
-  if (preferred) return preferred;
-  const text = clean(root.text());
-  return clean(text?.replace(/^About\s*/i, "").replace(/see more/gi, ""));
-}
-
-export function extractProfileFromHtml(html: string, sourceUrl: string): Profile {
-  const $ = cheerio.load(html);
-  const warnings: string[] = [];
-
-  const name = firstText($, ["main h1", "h1.text-heading-xlarge", "meta[property='og:title']"]);
-  const headline = firstText($, [
-    "main .text-body-medium.break-words",
-    ".pv-text-details__left-panel .text-body-medium",
-  ]);
-  const location = firstText($, [
-    "main .text-body-small.inline.t-black--light.break-words",
-    ".pv-text-details__left-panel .text-body-small",
-  ]);
-
-  const experience = itemLines($, "experience")
-    .map(parseExperience)
-    .filter((value): value is Experience => Boolean(value));
-  const education = itemLines($, "education")
-    .map(parseEducation)
-    .filter((value): value is Education => Boolean(value));
-  const skills = unique(itemLines($, "skills").map((lines) => lines[0]));
-
-  const certificationRoot = section($, "licenses_and_certifications");
-  const certificationLines = itemLines($, "licenses_and_certifications");
-  const certificationLinks = certificationRoot
-    .find("li.pvs-list__paged-list-item a[href], li.artdeco-list__item a[href]")
-    .map((_, link) => $(link).attr("href"))
-    .get();
-  const certifications = certificationLines
-    .map((lines, index) => parseCertification(lines, certificationLinks[index]))
-    .filter((value): value is Certification => Boolean(value));
-
-  const languages = itemLines($, "languages")
-    .map(parseLanguage)
-    .filter((value): value is Language => Boolean(value));
-
-  const ogImage = $("meta[property='og:image']").attr("content");
-  const profileImage = $("img.pv-top-card-profile-picture__image, img.pv-top-card-profile-picture__image--show")
-    .first()
-    .attr("src");
-  const profileImages = unique([profileImage, ogImage]).filter((value) => {
+function parseRows(input: string): Map<string, unknown> {
+  const rows = new Map<string, unknown>();
+  for (const line of flightStreams(input).flatMap((stream) => stream.split("\n"))) {
+    const separator = line.indexOf(":");
+    if (separator < 1) continue;
+    const payload = line.slice(separator + 1);
+    if (!payload.startsWith("[") && !payload.startsWith("{")) continue;
     try {
-      new URL(value);
-      return true;
+      rows.set(line.slice(0, separator).toLowerCase(), JSON.parse(payload));
     } catch {
-      return false;
+      // React Flight also emits non-JSON row kinds that this extractor does not need.
     }
-  });
+  }
+  return rows;
+}
 
-  if (!name) warnings.push("Profile name was not found; the page markup may have changed.");
-  if (!experience.length) warnings.push("No experience entries were visible in the rendered page.");
-  if (!education.length) warnings.push("No education entries were visible in the rendered page.");
+function collectSemanticText(
+  value: unknown,
+  rows: Map<string, unknown>,
+  output: string[],
+  seen = new Set<string>(),
+  depth = 0,
+): void {
+  if (depth > 80) return;
+  if (typeof value === "string") {
+    const reference = /^\$L?([0-9a-f]+)$/i.exec(value)?.[1]?.toLowerCase();
+    if (reference && !seen.has(reference)) {
+      seen.add(reference);
+      collectSemanticText(rows.get(reference), rows, output, seen, depth + 1);
+      seen.delete(reference);
+      return;
+    }
+    const normalized = clean(value);
+    if (normalized && !normalized.startsWith("$")) output.push(normalized);
+    return;
+  }
+  if (!Array.isArray(value)) return;
+  if (value[0] === "$" && value.length >= 4) {
+    const props = value[3] && typeof value[3] === "object" && !Array.isArray(value[3])
+      ? value[3] as Record<string, unknown>
+      : undefined;
+    const textProps = props?.textProps && typeof props.textProps === "object"
+      ? props.textProps as Record<string, unknown>
+      : undefined;
+    collectSemanticText(textProps?.children ?? props?.children, rows, output, seen, depth + 1);
+    return;
+  }
+  value.forEach((item) => collectSemanticText(item, rows, output, seen, depth + 1));
+}
+
+function semanticRows(input: string): { rows: Map<string, unknown>; values: FlightRow[] } {
+  const rows = parseRows(input);
+  const values = [...rows].map(([id, value]) => {
+    const output: string[] = [];
+    collectSemanticText(value, rows, output);
+    return { id, values: output.filter((item, index) => item !== output[index - 1]) };
+  }).filter((row) => row.values.length);
+  return { rows, values };
+}
+
+function validImageUrls(decoded: string): string[] {
+  const urls = [...decoded.matchAll(/https:\/\/[^"\\\s<>]+/g)]
+    .map((match) => match[0])
+    .filter((url) => /profile-displayphoto/i.test(url))
+    .filter((url) => {
+      try {
+        return new URL(url).protocol === "https:" && !url.endsWith("-");
+      } catch {
+        return false;
+      }
+    });
+  const firstGroup = urls[0]?.split("/profile-displayphoto")[0];
+  return unique(
+    firstGroup ? urls.filter((url) => url.startsWith(`${firstGroup}/profile-displayphoto`)) : [],
+    (url) => url,
+  );
+}
+
+export function extractIdentity(profileHtml: string): Identity {
+  const decoded = flightStreams(profileHtml).join("\n");
+  const title = clean(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(profileHtml)?.[1]);
+  const name = title?.replace(/\s*\|\s*LinkedIn\s*$/i, "").trim() || undefined;
+  const profileId = /"profileId":"([^"]+)"/.exec(decoded)?.[1];
+  const rows = semanticRows(profileHtml).values;
+  const contactIndex = rows.findIndex((row) => row.values.includes("Contact info"));
+  const headline = contactIndex >= 3 ? clean(rows[contactIndex - 3]?.values[0]) : undefined;
+  const location = contactIndex >= 1 ? clean(rows[contactIndex - 1]?.values[0]) : undefined;
+
+  let about: string | undefined;
+  for (let index = 0; index < rows.length && !about; index += 1) {
+    if (rows[index]?.values.length !== 1 || rows[index]?.values[0] !== "About") continue;
+    for (const candidate of rows.slice(index + 1, index + 5)) {
+      const value = clean(candidate.values.join("\n"));
+      if (value && value.length >= 40 && !/Talent Solutions|Marketing Solutions|Privacy & Terms/i.test(value)) {
+        about = value;
+        break;
+      }
+    }
+  }
 
   return {
-    sourceUrl,
-    fetchedAt: new Date().toISOString(),
+    ...(profileId ? { profileId } : {}),
     ...(name ? { name } : {}),
     ...(headline ? { headline } : {}),
     ...(location ? { location } : {}),
-    ...(aboutText($) ? { about: aboutText($) } : {}),
+    ...(about ? { about } : {}),
+    profileImages: validImageUrls(decoded),
+  };
+}
+
+function looksLikeDate(value: string | undefined): boolean {
+  return Boolean(value && /(?:19|20)\d{2}|Present/i.test(value) && /[-–·]/.test(value));
+}
+
+function withoutDuration(value: string): string {
+  const parts = value.split(/\s+·\s+/);
+  if (parts.length > 1 && /^(?:\d+\s+)?(?:yrs?|mos?|years?|months?|less than a year)/i.test(parts.at(-1) ?? "")) {
+    parts.pop();
+  }
+  return parts.join(" · ");
+}
+
+function splitOrganization(value: string): { organization?: string; kind?: string } {
+  const parts = value.split(/\s+·\s+/).map((part) => clean(part)).filter(Boolean) as string[];
+  return {
+    ...(parts[0] ? { organization: parts[0] } : {}),
+    ...(parts[1] ? { kind: parts.slice(1).join(" · ") } : {}),
+  };
+}
+
+function normalizeLocation(value: string | undefined): string | undefined {
+  const parts = value?.split(/\s+·\s+/).map((part) => clean(part)).filter(Boolean) as string[] | undefined;
+  if (!parts?.length) return undefined;
+  return parts.length === 2 && parts[0] === parts[1] ? parts[0] : parts.join(" · ");
+}
+
+function semanticValues(value: unknown, rows: Map<string, unknown>): string[] {
+  const output: string[] = [];
+  collectSemanticText(value, rows, output);
+  return output.filter((item, index) => item !== output[index - 1]);
+}
+
+export function extractExperience(input: string): Experience[] {
+  const parsed = semanticRows(input);
+  const itemRows = parsed.values.filter((row) => row.values.length >= 3 && looksLikeDate(row.values[2]));
+  return unique(itemRows.map((row) => {
+    const [title, organizationLine, date, rawLocation] = row.values;
+    const organization = splitOrganization(organizationLine ?? "");
+    const nextId = (Number.parseInt(row.id, 16) + 1).toString(16);
+    const descriptionValues = semanticValues(parsed.rows.get(nextId), parsed.rows);
+    const description = descriptionValues[0]?.startsWith("•")
+      ? clean(descriptionValues.join("\n"))
+      : undefined;
+    const location = normalizeLocation(rawLocation);
+    return {
+      title: title!,
+      ...(organization.organization ? { company: organization.organization } : {}),
+      ...(organization.kind ? { employmentType: organization.kind } : {}),
+      ...(date ? { dateRange: withoutDuration(date) } : {}),
+      ...(location ? { location } : {}),
+      ...(description ? { description } : {}),
+    };
+  }), (value) => `${value.title}|${value.company ?? ""}|${value.dateRange ?? ""}`);
+}
+
+export function extractEducation(input: string): Education[] {
+  const parsed = semanticRows(input);
+  const itemRows = parsed.values.filter((row) => row.values.length >= 3 && looksLikeDate(row.values[2]));
+  const itemIds = new Set(itemRows.map((row) => row.id));
+  return unique(itemRows.map((row) => {
+    const [school, degreeLine, date] = row.values;
+    const degreeParts = degreeLine?.split(/,\s+/, 2) ?? [];
+    const descriptionParts: string[] = [];
+    for (let offset = 1; offset <= 2; offset += 1) {
+      const candidateId = (Number.parseInt(row.id, 16) + offset).toString(16);
+      if (itemIds.has(candidateId)) break;
+      const candidate = semanticValues(parsed.rows.get(candidateId), parsed.rows);
+      if (candidate.some((value) => /^Grade:|activities|score|coursework/i.test(value))) {
+        descriptionParts.push(...candidate);
+      }
+    }
+    const description = clean(descriptionParts.join("\n"));
+    return {
+      school: school!,
+      ...(degreeParts[0] ? { degree: degreeParts[0] } : {}),
+      ...(degreeParts[1] ? { fieldOfStudy: degreeParts[1] } : {}),
+      ...(date ? { dateRange: withoutDuration(date) } : {}),
+      ...(description ? { description } : {}),
+    };
+  }), (value) => `${value.school}|${value.degree ?? ""}|${value.dateRange ?? ""}`);
+}
+
+function firstPageItemRows(input: string): FlightRow[] {
+  const parsed = semanticRows(input);
+  if (parsed.values.some((row) => row.values.includes("Nothing to see for now"))) return [];
+  const seen = new Set<string>();
+  const items: FlightRow[] = [];
+  for (const row of parsed.values) {
+    if (row.id === "0") continue;
+    const first = clean(row.values[0]);
+    if (!first || first.startsWith("{") || first === "Skills" || first === "Languages" || first === "Licenses & certifications") {
+      continue;
+    }
+    const key = first.toLowerCase();
+    if (seen.has(key)) break;
+    seen.add(key);
+    items.push(row);
+  }
+  return items;
+}
+
+export function extractSkills(input: string): string[] {
+  return firstPageItemRows(input).map((row) => row.values[0]!).filter(Boolean);
+}
+
+export function extractCertifications(input: string): Certification[] {
+  return firstPageItemRows(input).map((row) => {
+    const [name, ...details] = row.values;
+    const issuedRaw = details.find((value) => /^Issued\b|^Expires\b/i.test(value));
+    const credentialIdRaw = details.find((value) => /^Credential ID\b/i.test(value));
+    const issuer = details.find((value) => value !== issuedRaw && value !== credentialIdRaw && !/^Show credential$/i.test(value));
+    const issued = issuedRaw ? clean(issuedRaw.replace(/^Issued\s*/i, "")) : undefined;
+    const credentialId = credentialIdRaw ? clean(credentialIdRaw.replace(/^Credential ID\s*/i, "")) : undefined;
+    return {
+      name: name!,
+      ...(issuer ? { issuer } : {}),
+      ...(issued ? { issued } : {}),
+      ...(credentialId ? { credentialId } : {}),
+    };
+  });
+}
+
+export function extractLanguages(input: string): Language[] {
+  return firstPageItemRows(input).map((row) => ({
+    name: row.values[0]!,
+    ...(row.values[1] ? { proficiency: row.values[1] } : {}),
+  }));
+}
+
+export function countSectionItems(section: LinkedInSection, input: string): number {
+  if (section === "experience") return extractExperience(input).length;
+  if (section === "education") return extractEducation(input).length;
+  return firstPageItemRows(input).length;
+}
+
+export function extractProfileFromResponses(
+  profileHtml: string,
+  responses: LinkedInResponses,
+  sourceUrl: string,
+  now: Date = new Date(),
+): Profile {
+  const identity = extractIdentity(profileHtml);
+  const experience = unique(responses.experience.flatMap(extractExperience), (value) =>
+    `${value.title}|${value.company ?? ""}|${value.dateRange ?? ""}`);
+  const education = unique(responses.education.flatMap(extractEducation), (value) =>
+    `${value.school}|${value.degree ?? ""}|${value.dateRange ?? ""}`);
+  const skills = unique(responses.skills.flatMap(extractSkills), (value) => value.toLowerCase());
+  const certifications = unique(responses.certifications.flatMap(extractCertifications), (value) =>
+    `${value.name}|${value.issuer ?? ""}`);
+  const languages = unique(responses.languages.flatMap(extractLanguages), (value) => value.name.toLowerCase());
+  const warnings: string[] = [];
+  if (!identity.name) warnings.push("Profile name was not present in LinkedIn's response.");
+  if (!experience.length) warnings.push("No experience entries were returned by LinkedIn.");
+  if (!education.length) warnings.push("No education entries were returned by LinkedIn.");
+
+  return {
+    sourceUrl,
+    fetchedAt: now.toISOString(),
+    ...(identity.name ? { name: identity.name } : {}),
+    ...(identity.headline ? { headline: identity.headline } : {}),
+    ...(identity.location ? { location: identity.location } : {}),
+    ...(identity.about ? { about: identity.about } : {}),
     experience,
     education,
     skills,
     certifications,
     languages,
-    profileImages,
+    profileImages: identity.profileImages,
     warnings,
   };
 }

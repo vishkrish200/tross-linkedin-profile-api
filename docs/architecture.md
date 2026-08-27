@@ -7,8 +7,9 @@ HTTP request
   -> bearer-token check
   -> LinkedIn URL validation and canonicalization
   -> short-lived cache
-  -> profile provider
-  -> rendered-page extraction
+  -> direct LinkedIn profile-page request
+  -> direct RSC section-pagination requests
+  -> React Flight extraction
   -> Zod response validation
   -> JSON response
 ```
@@ -17,31 +18,34 @@ HTTP request
 
 ### HTTP layer
 
-`src/app.ts` owns routing, authentication, rate limiting, status codes, and the public error contract. It depends only on the `ProfileProvider` interface.
+`src/app.ts` owns routing, caller authentication, rate limiting, status codes, and the public error contract. It depends only on `ProfileProvider`.
 
 ### Domain layer
 
-`src/domain/profile.ts` is the stable public schema. `src/domain/linkedin-url.ts` accepts only canonical HTTPS LinkedIn `/in/` profile URLs, which prevents arbitrary server-side URL fetching.
+`src/domain/profile.ts` defines the stable public schema. `src/domain/linkedin-url.ts` accepts only HTTPS LinkedIn `/in/` profile URLs so the service cannot become a general-purpose URL fetcher.
 
 ### Provider layer
 
-`src/provider/profile-provider.ts` defines the external-data boundary. The current Playwright implementation loads an already-authenticated storage-state secret, renders a profile, and passes the resulting HTML to a pure extractor.
+`src/provider/linkedin-api-provider.ts` fetches the validated profile page and then calls LinkedIn's private RSC pagination endpoint for each supported section. Endpoints are constructed only from the validated public identifier and the transient profile identifier returned in LinkedIn's own server-rendered response. Session values come only from runtime configuration.
 
-`src/provider/extract-profile.ts` contains the markup-dependent logic. It is covered by a saved synthetic fixture so selector and parsing changes can be reviewed without contacting LinkedIn.
+`src/provider/extract-profile.ts` is a pure parser. It reads the `rehydrate-data` React Flight stream, resolves row references, collects semantic text from rendered component children, and maps section entries into the stable domain schema. Sanitized synthetic Flight fixtures cover this boundary without contacting LinkedIn.
 
 ### Operational controls
 
-- Successful profile results are cached briefly to reduce repeated upstream access.
-- Public callers can be protected with `API_KEY` and are rate-limited.
-- Authentication state is loaded at runtime and is excluded from Git and container layers.
-- Checkpoints and authentication walls are surfaced as errors; the service does not bypass them.
+- Successful results are cached briefly.
+- API callers can be protected with a bearer token and are rate-limited.
+- Session cookies and CSRF values exist only in runtime configuration.
+- Redirects to login/checkpoint pages and authentication failures are surfaced explicitly.
+- LinkedIn rate limits and challenge status codes are not retried or bypassed.
+- Section pagination is capped at five pages per section and successful aggregate results are cached.
 
 ## Deliberate omissions
 
-- No username or password handling.
+- No browser, Playwright, Chromium, or Selenium runtime.
+- No LinkedIn username or password handling.
 - No CAPTCHA or checkpoint solving.
-- No undocumented LinkedIn API endpoint is hard-coded.
+- No automatic retry loop against LinkedIn.
 - No database or long-term profile retention.
 - No deployment-specific SDK in the application core.
 
-These choices keep the first version small and make the compliance-sensitive provider replaceable.
+The private provider is intentionally isolated because its endpoint and schema are unstable and compliance-sensitive.
