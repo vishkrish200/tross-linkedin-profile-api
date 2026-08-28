@@ -6,7 +6,8 @@
 HTTP request
   -> bearer-token check
   -> LinkedIn URL validation and canonicalization
-  -> short-lived cache
+  -> short-lived cache and same-profile request coalescing
+  -> upstream concurrency limit
   -> direct LinkedIn profile-page request
   -> direct RSC section-pagination requests
   -> React Flight extraction
@@ -32,7 +33,8 @@ HTTP request
 
 ### Operational controls
 
-- Successful results are cached briefly.
+- Successful results are cached briefly, and simultaneous misses for the same profile share one upstream request.
+- Distinct uncached profile extractions are limited to two at a time by default.
 - API callers can be protected with a bearer token and are rate-limited.
 - Session cookies and CSRF values exist only in runtime configuration.
 - Redirects to login/checkpoint pages and authentication failures are surfaced explicitly.

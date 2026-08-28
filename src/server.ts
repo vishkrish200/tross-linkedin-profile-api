@@ -1,6 +1,7 @@
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { CacheProvider } from "./provider/cache-provider.js";
+import { ConcurrencyProvider } from "./provider/concurrency-provider.js";
 import { LinkedInApiProvider } from "./provider/linkedin-api-provider.js";
 
 const config = loadConfig();
@@ -10,7 +11,8 @@ const linkedinProvider = new LinkedInApiProvider({
   ...(config.linkedinUserAgent ? { userAgent: config.linkedinUserAgent } : {}),
   requestTimeoutMs: config.linkedinRequestTimeoutMs,
 });
-const provider = new CacheProvider(linkedinProvider, config.cacheTtlMs);
+const upstreamProvider = new ConcurrencyProvider(linkedinProvider, config.linkedinMaxConcurrency);
+const provider = new CacheProvider(upstreamProvider, config.cacheTtlMs);
 const app = await buildApp({
   provider,
   ...(config.apiKey ? { apiKey: config.apiKey } : {}),

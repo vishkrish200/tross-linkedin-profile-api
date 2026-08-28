@@ -62,7 +62,7 @@ Only HTTPS URLs on `linkedin.com` or `www.linkedin.com` whose path is exactly `/
 2. The provider fetches the profile page directly and reads LinkedIn's server-rendered React Flight data, including the transient profile identifier.
 3. It calls LinkedIn's private RSC pagination endpoint directly for experience, education, skills, certifications, and languages.
 4. The React Flight responses are resolved into the stable public schema.
-5. An authorized session cookie and CSRF token are supplied only through runtime secrets, and successful results are cached briefly to reduce upstream requests.
+5. An authorized session cookie and CSRF token are supplied only through runtime secrets. Successful results are cached briefly, simultaneous misses for one profile share a request, and distinct upstream extractions are concurrency-limited.
 
 No Playwright, Chromium, Selenium, or browser session is used by the application.
 
@@ -81,6 +81,7 @@ Set these runtime values in `.env` using a session you are authorized to use:
 - `LINKEDIN_COOKIE`: the minimum cookie header required by the authenticated LinkedIn requests, normally containing `li_at` and `JSESSIONID`.
 - `LINKEDIN_CSRF_TOKEN`: the CSRF value observed on the authorized request. It may be omitted when `JSESSIONID` is present because the provider derives its unquoted value.
 - `API_KEY`: a long random bearer token for callers of this API.
+- `LINKEDIN_MAX_CONCURRENCY`: maximum distinct LinkedIn profile extractions in flight; defaults to `2`.
 
 Do not paste these values into documentation, issue trackers, submission forms, logs, or source control. The service never accepts or stores a LinkedIn password.
 
@@ -140,6 +141,7 @@ The reference deployment runs on Google Cloud Run with the LinkedIn session and 
 - Session cookies expire and can trigger checkpoints.
 - Empty, private, or account-invisible fields are returned as empty arrays or omitted optional fields.
 - The cache is per process and is not shared across multiple instances.
+- A section returns at most 50 entries because upstream pagination is intentionally bounded.
 - Synthetic React Flight fixtures prove deterministic parsing; the dated live smoke test is the separate compatibility check.
 
 For component responsibilities, see [`docs/architecture.md`](docs/architecture.md). The delivery checklist is in [`docs/challenge-notes.md`](docs/challenge-notes.md).

@@ -10,6 +10,7 @@ export type AppConfig = {
   linkedinCsrfToken?: string;
   linkedinUserAgent?: string;
   linkedinRequestTimeoutMs: number;
+  linkedinMaxConcurrency: number;
 };
 
 function positiveInteger(value: string | undefined, fallback: number): number {
@@ -30,5 +31,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(env.LINKEDIN_CSRF_TOKEN ? { linkedinCsrfToken: env.LINKEDIN_CSRF_TOKEN } : {}),
     ...(env.LINKEDIN_USER_AGENT ? { linkedinUserAgent: env.LINKEDIN_USER_AGENT } : {}),
     linkedinRequestTimeoutMs: positiveInteger(env.LINKEDIN_REQUEST_TIMEOUT_MS, 20_000),
+    linkedinMaxConcurrency: positiveInteger(env.LINKEDIN_MAX_CONCURRENCY, 2),
   };
 }

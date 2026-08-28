@@ -8,6 +8,7 @@ type CacheEntry = {
 
 export class CacheProvider implements ProfileProvider {
   private readonly entries = new Map<string, CacheEntry>();
+  private readonly inFlight = new Map<string, Promise<Profile>>();
 
   constructor(
     private readonly inner: ProfileProvider,
@@ -21,11 +22,21 @@ export class CacheProvider implements ProfileProvider {
       return cached.value;
     }
 
-    const value = await this.inner.fetch(profileUrl);
-    this.entries.set(profileUrl, {
-      expiresAt: this.now() + this.ttlMs,
-      value,
-    });
-    return value;
+    const pending = this.inFlight.get(profileUrl);
+    if (pending) return pending;
+
+    const request = this.inner.fetch(profileUrl)
+      .then((value) => {
+        this.entries.set(profileUrl, {
+          expiresAt: this.now() + this.ttlMs,
+          value,
+        });
+        return value;
+      })
+      .finally(() => {
+        this.inFlight.delete(profileUrl);
+      });
+    this.inFlight.set(profileUrl, request);
+    return request;
   }
 }
