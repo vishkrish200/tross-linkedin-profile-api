@@ -32,6 +32,7 @@ export const profileHtml = [
 
 const liveShapedProfileStream = flight([
   ["1", ["$", "div", null, { children: [
+    textElement("They/Them"),
     textElement("· 1st"),
     textElement("Applied AI Engineer"),
     textElement("Example Company"),
@@ -131,6 +132,49 @@ export const liveShapedCertificationsFlight = flight([
   ["c", textElement("Generative AI Professional")],
   ["d", textElement("Example Cloud")],
   ["e", textElement("Issued Oct 2024")],
+]);
+
+export const liveShapedEducationWithoutDatesFlight = flight([
+  ["0", itemElement([
+    "Education",
+    collectionMarker("education-one"),
+    "Example University",
+    "BS, Quantitative Sciences; BA, Economics & Mathematics",
+    "Activities and societies:",
+    "- Student Council",
+    collectionMarker("education-two"),
+    "Example Summer School",
+    "Summer Program, Product Development",
+    collectionMarker("education-three"),
+    "Example International School",
+    "Cambridge AS & A Levels",
+    "Apr 2018",
+    "Grade: 94%",
+    "0.1.50904-1",
+  ])],
+  ["6", textElement("Education")],
+  ["8", itemElement([
+    "Example University",
+    "BS, Quantitative Sciences; BA, Economics & Mathematics",
+  ])],
+]);
+
+export const liveShapedLanguagesFlight = flight([
+  ["0", itemElement([
+    "Languages",
+    collectionMarker("language-one"),
+    "English",
+    "Native or bilingual proficiency",
+    collectionMarker("language-two"),
+    "Hindi",
+    "Native or bilingual proficiency",
+    "0.1.50904-1",
+  ])],
+  ["6", textElement("Languages")],
+  ["7", textElement("English")],
+  ["8", textElement("Native or bilingual proficiency")],
+  ["9", textElement("Hindi")],
+  ["a", textElement("Native or bilingual proficiency")],
 ]);
 
 export const languagesFlight = flight([

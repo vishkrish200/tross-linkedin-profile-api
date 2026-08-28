@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   countSectionItems,
   extractCertifications,
+  extractEducation,
   extractIdentity,
+  extractLanguages,
   extractProfileFromResponses,
 } from "../src/provider/extract-profile.js";
 import {
@@ -11,6 +13,8 @@ import {
   experienceFlight,
   languagesFlight,
   liveShapedCertificationsFlight,
+  liveShapedEducationWithoutDatesFlight,
+  liveShapedLanguagesFlight,
   liveShapedProfileHtml,
   profileHtml,
   skillsFlight,
@@ -55,6 +59,37 @@ describe("LinkedIn React Flight extraction", () => {
       },
     ]);
     expect(countSectionItems("certifications", liveShapedCertificationsFlight)).toBe(2);
+  });
+
+  it("keeps education entries when LinkedIn omits their date ranges", () => {
+    expect(extractEducation(liveShapedEducationWithoutDatesFlight)).toEqual([
+      {
+        school: "Example University",
+        degree: "BS",
+        fieldOfStudy: "Quantitative Sciences; BA, Economics & Mathematics",
+        description: "Activities and societies: - Student Council",
+      },
+      {
+        school: "Example Summer School",
+        degree: "Summer Program",
+        fieldOfStudy: "Product Development",
+      },
+      {
+        school: "Example International School",
+        degree: "Cambridge AS & A Levels",
+        dateRange: "Apr 2018",
+        description: "Grade: 94%",
+      },
+    ]);
+    expect(countSectionItems("education", liveShapedEducationWithoutDatesFlight)).toBe(3);
+  });
+
+  it("groups language proficiency with its language", () => {
+    expect(extractLanguages(liveShapedLanguagesFlight)).toEqual([
+      { name: "English", proficiency: "Native or bilingual proficiency" },
+      { name: "Hindi", proficiency: "Native or bilingual proficiency" },
+    ]);
+    expect(countSectionItems("languages", liveShapedLanguagesFlight)).toBe(2);
   });
 
   it("maps RSC section responses into the stable public schema", () => {

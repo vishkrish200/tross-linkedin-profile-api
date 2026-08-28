@@ -120,6 +120,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function entityCollectionGroups(input: string): string[][] {
+  let bestGroups: string[][] = [];
+  for (const row of semanticRows(input).values) {
+    const groups: string[][] = [];
+    let current: string[] | undefined;
+    for (const value of row.values) {
+      let isItemMarker = false;
+      try {
+        const metadata = JSON.parse(value) as unknown;
+        isItemMarker = isRecord(metadata)
+          && typeof metadata.semanticId === "string"
+          && metadata.semanticId.startsWith("entity-collection-item");
+      } catch {
+        // Ordinary rendered text is not metadata.
+      }
+      if (isItemMarker) {
+        if (current?.length) groups.push(current);
+        current = [];
+      } else if (current && !/^\d+\.\d+\.\d+(?:-\d+)?$/.test(value)) {
+        current.push(value);
+      }
+    }
+    if (current?.length) groups.push(current);
+    if (groups.length > bestGroups.length) bestGroups = groups;
+  }
+  return bestGroups;
+}
+
+function looksLikePronouns(value: string): boolean {
+  const pronoun = /^(?:he|him|his|she|her|hers|they|them|theirs|ze|zir|zie|hir|xe|xem)$/i;
+  const parts = value.split("/").map((part) => part.trim()).filter(Boolean);
+  return parts.length >= 2 && parts.length <= 3 && parts.every((part) => pronoun.test(part));
+}
+
 function structuredImageUrls(
   value: unknown,
   rows: Map<string, unknown>,
@@ -208,7 +242,8 @@ export function extractIdentity(profileHtml: string): Identity {
     ? headerRow!.values.slice(0, contactValueIndex).filter((value) =>
       value !== name
       && value !== "·"
-      && !/^·\s*(?:1st|2nd|3rd)$/i.test(value))
+      && !/^·\s*(?:1st|2nd|3rd)$/i.test(value)
+      && !looksLikePronouns(value))
     : [];
   const standaloneContactIndex = rows.findIndex((row) =>
     row.values.length === 1 && row.values[0] === "Contact info");
@@ -251,6 +286,10 @@ export function extractIdentity(profileHtml: string): Identity {
 
 function looksLikeDate(value: string | undefined): boolean {
   return Boolean(value && /(?:19|20)\d{2}|Present/i.test(value) && /[-–·]/.test(value));
+}
+
+function looksLikeStandaloneDate(value: string | undefined): boolean {
+  return Boolean(value && /^(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+)?(?:19|20)\d{2}$/i.test(value));
 }
 
 function withoutDuration(value: string): string {
@@ -309,6 +348,32 @@ export function extractExperience(input: string): Experience[] {
 }
 
 export function extractEducation(input: string): Education[] {
+  const collectionGroups = entityCollectionGroups(input);
+  if (collectionGroups.length) {
+    return unique(collectionGroups.map((values): Education | undefined => {
+      const school = clean(values[0]);
+      if (!school) return undefined;
+      const details = values.slice(1);
+      const date = details.find((value) => looksLikeDate(value) || looksLikeStandaloneDate(value));
+      const degreeLine = details.find((value) =>
+        value !== date && !/^Grade:|^Activities and societies:/i.test(value));
+      const separator = degreeLine?.indexOf(", ") ?? -1;
+      const degree = separator >= 0 ? clean(degreeLine?.slice(0, separator)) : clean(degreeLine);
+      const fieldOfStudy = separator >= 0 ? clean(degreeLine?.slice(separator + 2)) : undefined;
+      const description = clean(details
+        .filter((value) => value !== date && value !== degreeLine)
+        .join("\n"));
+      return {
+        school,
+        ...(degree ? { degree } : {}),
+        ...(fieldOfStudy ? { fieldOfStudy } : {}),
+        ...(date ? { dateRange: withoutDuration(date) } : {}),
+        ...(description ? { description } : {}),
+      };
+    }).filter((value): value is Education => Boolean(value)), (value) =>
+      `${value.school}|${value.degree ?? ""}|${value.dateRange ?? ""}`);
+  }
+
   const parsed = semanticRows(input);
   const itemRows = parsed.values.filter((row) =>
     row.id !== "0"
@@ -318,7 +383,9 @@ export function extractEducation(input: string): Education[] {
   const itemIds = new Set(itemRows.map((row) => row.id));
   return unique(itemRows.map((row) => {
     const [school, degreeLine, date] = row.values;
-    const degreeParts = degreeLine?.split(/,\s+/, 2) ?? [];
+    const separator = degreeLine?.indexOf(", ") ?? -1;
+    const degree = separator >= 0 ? clean(degreeLine?.slice(0, separator)) : clean(degreeLine);
+    const fieldOfStudy = separator >= 0 ? clean(degreeLine?.slice(separator + 2)) : undefined;
     const descriptionParts: string[] = [];
     for (let offset = 1; offset <= 2; offset += 1) {
       const candidateId = (Number.parseInt(row.id, 16) + offset).toString(16);
@@ -331,8 +398,8 @@ export function extractEducation(input: string): Education[] {
     const description = clean(descriptionParts.join("\n"));
     return {
       school: school!,
-      ...(degreeParts[0] ? { degree: degreeParts[0] } : {}),
-      ...(degreeParts[1] ? { fieldOfStudy: degreeParts[1] } : {}),
+      ...(degree ? { degree } : {}),
+      ...(fieldOfStudy ? { fieldOfStudy } : {}),
       ...(date ? { dateRange: withoutDuration(date) } : {}),
       ...(description ? { description } : {}),
     };
@@ -363,33 +430,7 @@ export function extractSkills(input: string): string[] {
 }
 
 export function extractCertifications(input: string): Certification[] {
-  const collectionGroups: string[][] = [];
-  for (const row of semanticRows(input).values) {
-    const groups: string[][] = [];
-    let current: string[] | undefined;
-    for (const value of row.values) {
-      let isItemMarker = false;
-      try {
-        const metadata = JSON.parse(value) as unknown;
-        isItemMarker = isRecord(metadata)
-          && typeof metadata.semanticId === "string"
-          && metadata.semanticId.startsWith("entity-collection-item");
-      } catch {
-        // Ordinary rendered text is not metadata.
-      }
-      if (isItemMarker) {
-        if (current?.length) groups.push(current);
-        current = [];
-      } else if (current) {
-        current.push(value);
-      }
-    }
-    if (current?.length) groups.push(current);
-    if (groups.length > collectionGroups.length) {
-      collectionGroups.splice(0, collectionGroups.length, ...groups);
-    }
-  }
-
+  const collectionGroups = entityCollectionGroups(input);
   const itemValues = collectionGroups.length
     ? collectionGroups
     : firstPageItemRows(input).map((row) => row.values);
@@ -412,6 +453,13 @@ export function extractCertifications(input: string): Certification[] {
 }
 
 export function extractLanguages(input: string): Language[] {
+  const collectionGroups = entityCollectionGroups(input);
+  if (collectionGroups.length) {
+    return collectionGroups.map(([name, proficiency]) => ({
+      name: name!,
+      ...(proficiency ? { proficiency } : {}),
+    })).filter((language) => Boolean(language.name));
+  }
   return firstPageItemRows(input).map((row) => ({
     name: row.values[0]!,
     ...(row.values[1] ? { proficiency: row.values[1] } : {}),
