@@ -283,7 +283,11 @@ function semanticValues(value: unknown, rows: Map<string, unknown>): string[] {
 
 export function extractExperience(input: string): Experience[] {
   const parsed = semanticRows(input);
-  const itemRows = parsed.values.filter((row) => row.values.length >= 3 && looksLikeDate(row.values[2]));
+  const itemRows = parsed.values.filter((row) =>
+    row.id !== "0"
+    && !row.values[0]?.startsWith("{")
+    && row.values.length >= 3
+    && looksLikeDate(row.values[2]));
   return unique(itemRows.map((row) => {
     const [title, organizationLine, date, rawLocation] = row.values;
     const organization = splitOrganization(organizationLine ?? "");
@@ -306,7 +310,11 @@ export function extractExperience(input: string): Experience[] {
 
 export function extractEducation(input: string): Education[] {
   const parsed = semanticRows(input);
-  const itemRows = parsed.values.filter((row) => row.values.length >= 3 && looksLikeDate(row.values[2]));
+  const itemRows = parsed.values.filter((row) =>
+    row.id !== "0"
+    && !row.values[0]?.startsWith("{")
+    && row.values.length >= 3
+    && looksLikeDate(row.values[2]));
   const itemIds = new Set(itemRows.map((row) => row.id));
   return unique(itemRows.map((row) => {
     const [school, degreeLine, date] = row.values;

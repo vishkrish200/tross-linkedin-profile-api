@@ -71,6 +71,14 @@ export const experienceFlight = flight([
 ]);
 
 export const educationFlight = flight([
+  ["0", itemElement([
+    JSON.stringify({ key: "section-metadata", semanticId: "" }),
+    "Education",
+    JSON.stringify({
+      key: "entity-collection-item--20586538",
+      semanticId: "entity-collection-item--20586538",
+    }),
+  ])],
   ["4", itemElement([
     "Example Institute",
     "Bachelor of Technology, Computer Science",
