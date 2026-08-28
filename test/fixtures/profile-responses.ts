@@ -30,6 +30,36 @@ export const profileHtml = [
   "</body></html>",
 ].join("");
 
+const liveShapedProfileStream = flight([
+  ["1", ["$", "div", null, { children: [
+    textElement("· 1st"),
+    textElement("Applied AI Engineer"),
+    textElement("Example Company"),
+    textElement("Example City, India"),
+    textElement("·"),
+    textElement("Contact info"),
+    {
+      source: {
+        renderPayload: {
+          rootUrl: "https://media.example.test/profile-displayphoto-shrink_",
+          imageRenditions: [
+            { width: 100, height: 100, suffixUrl: "100_100/example-small.jpg" },
+            { width: 400, height: 400, suffixUrl: "400_400/example-large.jpg" },
+          ],
+        },
+      },
+    },
+  ] }]],
+  ["2", textElement("Example Person")],
+  ["3", { payload: { vanityName: "example-person", profileId: "profile-live-shaped" } }],
+]);
+
+export const liveShapedProfileHtml = [
+  "<!doctype html><html><head><title>Example Person | LinkedIn</title></head><body>",
+  `<script id="rehydrate-data">window.__como_rehydration__ = ${JSON.stringify([liveShapedProfileStream])};</script>`,
+  "</body></html>",
+].join("");
+
 export const experienceFlight = flight([
   ["4", itemElement([
     "Senior Software Engineer",
@@ -62,6 +92,37 @@ export const certificationsFlight = flight([
     "Credential ID EXAMPLE-123",
   ])],
   ["5", textElement("Cloud Engineer")],
+]);
+
+function collectionMarker(id: string) {
+  return JSON.stringify({
+    key: `entity-collection-item-${id}`,
+    semanticId: `entity-collection-item-${id}`,
+    threadlineDecoration: null,
+  });
+}
+
+export const liveShapedCertificationsFlight = flight([
+  ["0", itemElement([
+    "Licenses & certifications",
+    collectionMarker("one"),
+    "Machine Learning Associate",
+    "Example Cloud",
+    "Issued Nov 2024 · Expires Nov 2026",
+    collectionMarker("two"),
+    "Generative AI Professional",
+    "Example Cloud",
+    "Issued Oct 2024",
+    "Skills:",
+    "Artificial Intelligence, Machine Learning",
+  ])],
+  ["6", textElement("Licenses & certifications")],
+  ["8", textElement("Machine Learning Associate")],
+  ["9", textElement("Example Cloud")],
+  ["a", textElement("Issued Nov 2024 · Expires Nov 2026")],
+  ["c", textElement("Generative AI Professional")],
+  ["d", textElement("Example Cloud")],
+  ["e", textElement("Issued Oct 2024")],
 ]);
 
 export const languagesFlight = flight([

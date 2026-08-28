@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   countSectionItems,
+  extractCertifications,
   extractIdentity,
   extractProfileFromResponses,
 } from "../src/provider/extract-profile.js";
@@ -9,6 +10,8 @@ import {
   educationFlight,
   experienceFlight,
   languagesFlight,
+  liveShapedCertificationsFlight,
+  liveShapedProfileHtml,
   profileHtml,
   skillsFlight,
 } from "./fixtures/profile-responses.js";
@@ -23,6 +26,35 @@ describe("LinkedIn React Flight extraction", () => {
       about: "I build reliable products and evaluation systems for agentic software.",
       profileImages: ["https://media.example.test/profile-displayphoto-scale_400_400/example.jpg"],
     });
+  });
+
+  it("extracts identity and complete image renditions from the current composite header shape", () => {
+    expect(extractIdentity(liveShapedProfileHtml)).toEqual({
+      profileId: "profile-live-shaped",
+      name: "Example Person",
+      headline: "Applied AI Engineer",
+      location: "Example City, India",
+      profileImages: [
+        "https://media.example.test/profile-displayphoto-shrink_100_100/example-small.jpg",
+        "https://media.example.test/profile-displayphoto-shrink_400_400/example-large.jpg",
+      ],
+    });
+  });
+
+  it("groups current certification rows by LinkedIn collection metadata", () => {
+    expect(extractCertifications(liveShapedCertificationsFlight)).toEqual([
+      {
+        name: "Machine Learning Associate",
+        issuer: "Example Cloud",
+        issued: "Nov 2024 · Expires Nov 2026",
+      },
+      {
+        name: "Generative AI Professional",
+        issuer: "Example Cloud",
+        issued: "Oct 2024",
+      },
+    ]);
+    expect(countSectionItems("certifications", liveShapedCertificationsFlight)).toBe(2);
   });
 
   it("maps RSC section responses into the stable public schema", () => {

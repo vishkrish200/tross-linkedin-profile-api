@@ -116,13 +116,74 @@ function semanticRows(input: string): { rows: Map<string, unknown>; values: Flig
   return { rows, values };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function structuredImageUrls(
+  value: unknown,
+  rows: Map<string, unknown>,
+  output: string[],
+  seenReferences = new Set<string>(),
+  seenObjects = new Set<object>(),
+  depth = 0,
+): void {
+  if (depth > 80) return;
+  if (typeof value === "string") {
+    const reference = /^\$L?([0-9a-f]+)$/i.exec(value)?.[1]?.toLowerCase();
+    if (reference && !seenReferences.has(reference)) {
+      seenReferences.add(reference);
+      structuredImageUrls(
+        rows.get(reference),
+        rows,
+        output,
+        seenReferences,
+        seenObjects,
+        depth + 1,
+      );
+      seenReferences.delete(reference);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object" || seenObjects.has(value)) return;
+  seenObjects.add(value);
+
+  if (isRecord(value)
+    && typeof value.rootUrl === "string"
+    && /profile-displayphoto/i.test(value.rootUrl)
+    && Array.isArray(value.imageRenditions)) {
+    const renditions = value.imageRenditions
+      .filter((rendition): rendition is Record<string, unknown> => isRecord(rendition))
+      .filter((rendition) => typeof rendition.suffixUrl === "string")
+      .sort((left, right) => Number(left.width ?? 0) - Number(right.width ?? 0));
+    for (const rendition of renditions) {
+      const url = `${value.rootUrl}${rendition.suffixUrl as string}`;
+      try {
+        if (new URL(url).protocol === "https:") output.push(url);
+      } catch {
+        // Ignore malformed upstream image renditions.
+      }
+    }
+  }
+
+  const children = Array.isArray(value) ? value : Object.values(value);
+  children.forEach((child) => structuredImageUrls(
+    child,
+    rows,
+    output,
+    seenReferences,
+    seenObjects,
+    depth + 1,
+  ));
+}
+
 function validImageUrls(decoded: string): string[] {
   const urls = [...decoded.matchAll(/https:\/\/[^"\\\s<>]+/g)]
     .map((match) => match[0])
     .filter((url) => /profile-displayphoto/i.test(url))
     .filter((url) => {
       try {
-        return new URL(url).protocol === "https:" && !url.endsWith("-");
+        return new URL(url).protocol === "https:" && !/[-_]$/.test(url);
       } catch {
         return false;
       }
@@ -139,10 +200,27 @@ export function extractIdentity(profileHtml: string): Identity {
   const title = clean(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(profileHtml)?.[1]);
   const name = title?.replace(/\s*\|\s*LinkedIn\s*$/i, "").trim() || undefined;
   const profileId = /"profileId":"([^"]+)"/.exec(decoded)?.[1];
-  const rows = semanticRows(profileHtml).values;
-  const contactIndex = rows.findIndex((row) => row.values.includes("Contact info"));
-  const headline = contactIndex >= 3 ? clean(rows[contactIndex - 3]?.values[0]) : undefined;
-  const location = contactIndex >= 1 ? clean(rows[contactIndex - 1]?.values[0]) : undefined;
+  const parsed = semanticRows(profileHtml);
+  const rows = parsed.values;
+  const headerRow = rows.find((row) => row.values.length > 1 && row.values.includes("Contact info"));
+  const contactValueIndex = headerRow?.values.indexOf("Contact info") ?? -1;
+  const headerValues = contactValueIndex > 0
+    ? headerRow!.values.slice(0, contactValueIndex).filter((value) =>
+      value !== name
+      && value !== "·"
+      && !/^·\s*(?:1st|2nd|3rd)$/i.test(value))
+    : [];
+  const standaloneContactIndex = rows.findIndex((row) =>
+    row.values.length === 1 && row.values[0] === "Contact info");
+  const headline = clean(
+    headerValues[0]
+      ?? (standaloneContactIndex >= 3 ? rows[standaloneContactIndex - 3]?.values[0] : undefined),
+  );
+  const location = clean(
+    headerValues.length > 1
+      ? headerValues.at(-1)
+      : (standaloneContactIndex >= 1 ? rows[standaloneContactIndex - 1]?.values[0] : undefined),
+  );
 
   let about: string | undefined;
   for (let index = 0; index < rows.length && !about; index += 1) {
@@ -156,13 +234,18 @@ export function extractIdentity(profileHtml: string): Identity {
     }
   }
 
+  const profileImages: string[] = [];
+  if (headerRow) {
+    structuredImageUrls(parsed.rows.get(headerRow.id), parsed.rows, profileImages);
+  }
+
   return {
     ...(profileId ? { profileId } : {}),
     ...(name ? { name } : {}),
     ...(headline ? { headline } : {}),
     ...(location ? { location } : {}),
     ...(about ? { about } : {}),
-    profileImages: validImageUrls(decoded),
+    profileImages: unique(profileImages.length ? profileImages : validImageUrls(decoded), (url) => url),
   };
 }
 
@@ -272,8 +355,40 @@ export function extractSkills(input: string): string[] {
 }
 
 export function extractCertifications(input: string): Certification[] {
-  return firstPageItemRows(input).map((row) => {
-    const [name, ...details] = row.values;
+  const collectionGroups: string[][] = [];
+  for (const row of semanticRows(input).values) {
+    const groups: string[][] = [];
+    let current: string[] | undefined;
+    for (const value of row.values) {
+      let isItemMarker = false;
+      try {
+        const metadata = JSON.parse(value) as unknown;
+        isItemMarker = isRecord(metadata)
+          && typeof metadata.semanticId === "string"
+          && metadata.semanticId.startsWith("entity-collection-item");
+      } catch {
+        // Ordinary rendered text is not metadata.
+      }
+      if (isItemMarker) {
+        if (current?.length) groups.push(current);
+        current = [];
+      } else if (current) {
+        current.push(value);
+      }
+    }
+    if (current?.length) groups.push(current);
+    if (groups.length > collectionGroups.length) {
+      collectionGroups.splice(0, collectionGroups.length, ...groups);
+    }
+  }
+
+  const itemValues = collectionGroups.length
+    ? collectionGroups
+    : firstPageItemRows(input).map((row) => row.values);
+  return itemValues.map((values) => {
+    const [name, ...allDetails] = values;
+    const skillsIndex = allDetails.findIndex((value) => /^Skills:$/i.test(value));
+    const details = skillsIndex >= 0 ? allDetails.slice(0, skillsIndex) : allDetails;
     const issuedRaw = details.find((value) => /^Issued\b|^Expires\b/i.test(value));
     const credentialIdRaw = details.find((value) => /^Credential ID\b/i.test(value));
     const issuer = details.find((value) => value !== issuedRaw && value !== credentialIdRaw && !/^Show credential$/i.test(value));
@@ -298,7 +413,9 @@ export function extractLanguages(input: string): Language[] {
 export function countSectionItems(section: LinkedInSection, input: string): number {
   if (section === "experience") return extractExperience(input).length;
   if (section === "education") return extractEducation(input).length;
-  return firstPageItemRows(input).length;
+  if (section === "skills") return extractSkills(input).length;
+  if (section === "certifications") return extractCertifications(input).length;
+  return extractLanguages(input).length;
 }
 
 export function extractProfileFromResponses(
