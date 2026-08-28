@@ -3,6 +3,7 @@ import {
   countSectionItems,
   extractCertifications,
   extractEducation,
+  extractExperience,
   extractIdentity,
   extractLanguages,
   extractProfileFromResponses,
@@ -11,12 +12,14 @@ import {
   certificationsFlight,
   educationFlight,
   experienceFlight,
+  groupedExperienceFlight,
   languagesFlight,
   liveShapedCertificationsFlight,
   liveShapedEducationWithoutDatesFlight,
   liveShapedLanguagesFlight,
   liveShapedProfileHtml,
   profileHtml,
+  rootImageProfileHtml,
   skillsFlight,
 } from "./fixtures/profile-responses.js";
 
@@ -43,6 +46,41 @@ describe("LinkedIn React Flight extraction", () => {
         "https://media.example.test/profile-displayphoto-shrink_400_400/example-large.jpg",
       ],
     });
+  });
+
+  it("extracts profile images when they are attached to the root profile component", () => {
+    expect(extractIdentity(rootImageProfileHtml)).toEqual({
+      profileId: "profile-root-image",
+      name: "Root Image Person",
+      headline: "Root Image Engineer",
+      location: "Example City, India",
+      profileImages: [
+        "https://media.example.test/profile-displayphoto-shrink_100_100/root-small.jpg",
+        "https://media.example.test/profile-displayphoto-shrink_400_400/root-large.jpg",
+      ],
+    });
+  });
+
+  it("extracts multiple roles grouped under one company", () => {
+    expect(extractExperience(groupedExperienceFlight)).toEqual([
+      {
+        title: "Senior Product Manager",
+        company: "Example Company",
+        employmentType: "Full-time",
+        dateRange: "Jan 2023 - Present",
+        location: "Remote",
+        description: "Led the current product portfolio.",
+      },
+      {
+        title: "Product Manager",
+        company: "Example Company",
+        employmentType: "Full-time",
+        dateRange: "Jan 2020 - Dec 2022",
+        location: "Example City, India · On-site",
+        description: "Built the first version of the product.",
+      },
+    ]);
+    expect(countSectionItems("experience", groupedExperienceFlight)).toBe(2);
   });
 
   it("groups current certification rows by LinkedIn collection metadata", () => {

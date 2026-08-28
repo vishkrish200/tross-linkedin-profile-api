@@ -61,6 +61,34 @@ export const liveShapedProfileHtml = [
   "</body></html>",
 ].join("");
 
+const rootImageProfileStream = flight([
+  ["0", ["$", "main", null, { children: [{
+    source: {
+      renderPayload: {
+        rootUrl: "https://media.example.test/profile-displayphoto-shrink_",
+        imageRenditions: [
+          { width: 100, height: 100, suffixUrl: "100_100/root-small.jpg" },
+          { width: 400, height: 400, suffixUrl: "400_400/root-large.jpg" },
+        ],
+      },
+    },
+  }] }]],
+  ["1", itemElement([
+    "Root Image Engineer",
+    "Example Company",
+    "Example City, India",
+    "Contact info",
+  ])],
+  ["2", textElement("Root Image Person")],
+  ["3", { payload: { vanityName: "root-image-person", profileId: "profile-root-image" } }],
+]);
+
+export const rootImageProfileHtml = [
+  "<!doctype html><html><head><title>Root Image Person | LinkedIn</title></head><body>",
+  `<script id="rehydrate-data">window.__como_rehydration__ = ${JSON.stringify([rootImageProfileStream])};</script>`,
+  "</body></html>",
+].join("");
+
 export const experienceFlight = flight([
   ["4", itemElement([
     "Senior Software Engineer",
@@ -69,6 +97,29 @@ export const experienceFlight = flight([
     "Bengaluru, India · Hybrid",
   ])],
   ["5", itemElement(["• Built dependable agent systems.", "• Added deterministic evaluations."])],
+]);
+
+export const groupedExperienceFlight = flight([
+  ["0", itemElement([
+    "Experience",
+    collectionMarker("grouped-company"),
+    "Example Company",
+    "Full-time · 7 yrs",
+    "Example Product Group",
+    "Senior Product Manager",
+    "Jan 2023 - Present · 3 yrs",
+    "Remote",
+    "Led the current product portfolio.",
+    "Skills:",
+    "Product Strategy, Leadership",
+    "Product Manager",
+    "Jan 2020 - Dec 2022 · 3 yrs",
+    "Example City, India · On-site",
+    "Built the first version of the product.",
+    "Skills:",
+    "Product Management",
+  ])],
+  ["6", textElement("Experience")],
 ]);
 
 export const educationFlight = flight([

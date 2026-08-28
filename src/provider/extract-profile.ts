@@ -229,6 +229,25 @@ function validImageUrls(decoded: string): string[] {
   );
 }
 
+function identityImageUrls(
+  headerRow: FlightRow | undefined,
+  rows: Map<string, unknown>,
+  decoded: string,
+): string[] {
+  const headerImages: string[] = [];
+  if (headerRow) structuredImageUrls(rows.get(headerRow.id), rows, headerImages);
+  if (headerImages.length) return unique(headerImages, (url) => url);
+
+  // In LinkedIn's current profile response the photo can be a sibling of the
+  // text header beneath the root Flight row, so it is not always reachable
+  // from the row containing "Contact info".
+  const rootImages: string[] = [];
+  structuredImageUrls(rows.get("0"), rows, rootImages);
+  if (rootImages.length) return unique(rootImages, (url) => url);
+
+  return validImageUrls(decoded);
+}
+
 export function extractIdentity(profileHtml: string): Identity {
   const decoded = flightStreams(profileHtml).join("\n");
   const title = clean(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(profileHtml)?.[1]);
@@ -269,18 +288,13 @@ export function extractIdentity(profileHtml: string): Identity {
     }
   }
 
-  const profileImages: string[] = [];
-  if (headerRow) {
-    structuredImageUrls(parsed.rows.get(headerRow.id), parsed.rows, profileImages);
-  }
-
   return {
     ...(profileId ? { profileId } : {}),
     ...(name ? { name } : {}),
     ...(headline ? { headline } : {}),
     ...(location ? { location } : {}),
     ...(about ? { about } : {}),
-    profileImages: unique(profileImages.length ? profileImages : validImageUrls(decoded), (url) => url),
+    profileImages: identityImageUrls(headerRow, parsed.rows, decoded),
   };
 }
 
@@ -320,6 +334,70 @@ function semanticValues(value: unknown, rows: Map<string, unknown>): string[] {
   return output.filter((item, index) => item !== output[index - 1]);
 }
 
+function experienceDescription(values: string[]): string | undefined {
+  const skillsIndex = values.findIndex((value) => /^Skills:$/i.test(value));
+  const descriptionValues = skillsIndex >= 0 ? values.slice(0, skillsIndex) : values;
+  return clean(descriptionValues.join("\n"));
+}
+
+function employmentType(values: string[]): string | undefined {
+  const match = values
+    .flatMap((value) => value.split(/\s+·\s+/))
+    .map((value) => clean(value))
+    .find((value) => /^(?:Full-time|Part-time|Self-employed|Freelance|Contract|Internship|Apprenticeship|Seasonal)$/i.test(value ?? ""));
+  return match;
+}
+
+function groupedExperience(values: string[]): Experience[] {
+  const dateIndexes = values
+    .map((value, index) => looksLikeDate(value) ? index : -1)
+    .filter((index) => index >= 0);
+  if (!dateIndexes.length) return [];
+
+  // Some collection responses still contain a conventional flat entry.
+  if (dateIndexes[0] === 2) {
+    const [title, organizationLine, date, rawLocation, ...details] = values;
+    const organization = splitOrganization(organizationLine ?? "");
+    const description = experienceDescription(details);
+    const location = normalizeLocation(rawLocation);
+    return title ? [{
+      title,
+      ...(organization.organization ? { company: organization.organization } : {}),
+      ...(organization.kind ? { employmentType: organization.kind } : {}),
+      ...(date ? { dateRange: withoutDuration(date) } : {}),
+      ...(location ? { location } : {}),
+      ...(description ? { description } : {}),
+    }] : [];
+  }
+
+  // LinkedIn groups several roles at one company into one collection item.
+  // Each role title immediately precedes its date; the company metadata sits
+  // before the first title/date pair.
+  const company = clean(values[0]);
+  const firstDateIndex = dateIndexes[0]!;
+  const kind = employmentType(values.slice(1, Math.max(1, firstDateIndex - 1)));
+  return dateIndexes.map((dateIndex, roleIndex): Experience | undefined => {
+    const title = clean(values[dateIndex - 1]);
+    const date = clean(values[dateIndex]);
+    if (!title || !date || /^Skills:$/i.test(title)) return undefined;
+
+    const nextDateIndex = dateIndexes[roleIndex + 1];
+    const roleEnd = nextDateIndex === undefined ? values.length : nextDateIndex - 1;
+    const afterDate = values.slice(dateIndex + 1, roleEnd);
+    const rawLocation = afterDate[0] && !/^Skills:$/i.test(afterDate[0]) ? afterDate[0] : undefined;
+    const description = experienceDescription(afterDate.slice(rawLocation ? 1 : 0));
+    const location = normalizeLocation(rawLocation);
+    return {
+      title,
+      ...(company ? { company } : {}),
+      ...(kind ? { employmentType: kind } : {}),
+      dateRange: withoutDuration(date),
+      ...(location ? { location } : {}),
+      ...(description ? { description } : {}),
+    };
+  }).filter((value): value is Experience => Boolean(value));
+}
+
 export function extractExperience(input: string): Experience[] {
   const parsed = semanticRows(input);
   const itemRows = parsed.values.filter((row) =>
@@ -327,7 +405,7 @@ export function extractExperience(input: string): Experience[] {
     && !row.values[0]?.startsWith("{")
     && row.values.length >= 3
     && looksLikeDate(row.values[2]));
-  return unique(itemRows.map((row) => {
+  const flatExperience = unique(itemRows.map((row) => {
     const [title, organizationLine, date, rawLocation] = row.values;
     const organization = splitOrganization(organizationLine ?? "");
     const nextId = (Number.parseInt(row.id, 16) + 1).toString(16);
@@ -345,6 +423,10 @@ export function extractExperience(input: string): Experience[] {
       ...(description ? { description } : {}),
     };
   }), (value) => `${value.title}|${value.company ?? ""}|${value.dateRange ?? ""}`);
+  if (flatExperience.length) return flatExperience;
+
+  return unique(entityCollectionGroups(input).flatMap(groupedExperience), (value) =>
+    `${value.title}|${value.company ?? ""}|${value.dateRange ?? ""}`);
 }
 
 export function extractEducation(input: string): Education[] {
