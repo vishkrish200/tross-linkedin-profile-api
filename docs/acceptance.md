@@ -18,15 +18,16 @@ On August 29, 2026, Cloud Run revision `tross-linkedin-profile-api-00009-p5w` pa
 
 This is pass evidence for the dated sample, not a claim that every profile or future undocumented LinkedIn response shape will work.
 
-## August 30 release-candidate recheck
+## August 30 deployed-release recheck
 
-A bounded three-case canary covered a content-rich profile, a profile with more skills than the public cap, and a profile whose advertised About card was explicitly empty. The canary exposed two edge cases; after regression fixes, both affected cases were called once more on the final candidate:
+An initial bounded release-candidate canary covered a content-rich profile, a profile with more skills than the public cap, and a profile whose advertised About card was explicitly empty. It exposed two edge cases, which were fixed and rechecked locally. Source commit `fc8c505` was then deployed as Cloud Run revision `tross-linkedin-profile-api-fc8c505`, and the same three cases were called once against that production revision:
 
+- All three production requests returned HTTP 200 with name, headline, location, and profile images present.
 - The explicit-empty About card returned HTTP 200 with About omitted, all core identity fields present, and no parser warning.
 - The oversized skills case returned exactly 50 skills plus `skills reached the 50-item safety limit and may be truncated.`
 - No authentication wall, checkpoint, CAPTCHA, HTTP 429/999, or protection signal appeared.
 
-The same candidate passed 136 deterministic tests, TypeScript compilation, a production Docker build and endpoint smoke test, a production-dependency audit with zero reported vulnerabilities, and a full-history secret scan. Only field-presence flags, aggregate counts, generic warnings, and status codes were retained from live calls.
+The same source release passed 136 deterministic tests, TypeScript compilation, a production Docker build and endpoint smoke test, a production-dependency audit with zero reported vulnerabilities, and a full-history secret scan. Its public discovery, human-readable docs, OpenAPI 3.1 document, health route, and unauthenticated 401 boundary were also verified after deployment. Only field-presence flags, aggregate counts, generic warnings, and status codes were retained from live calls.
 
 ## Defects found through acceptance testing
 
