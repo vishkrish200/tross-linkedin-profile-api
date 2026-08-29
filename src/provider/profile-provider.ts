@@ -1,7 +1,11 @@
 import type { Profile } from "../domain/profile.js";
 
+export type ProfileFetchOptions = {
+  signal?: AbortSignal;
+};
+
 export interface ProfileProvider {
-  fetch(profileUrl: string): Promise<Profile>;
+  fetch(profileUrl: string, options?: ProfileFetchOptions): Promise<Profile>;
 }
 
 export class ProviderNotConfiguredError extends Error {
@@ -22,5 +26,19 @@ export class ProviderFetchError extends Error {
   constructor(message = "LinkedIn profile retrieval failed") {
     super(message);
     this.name = "ProviderFetchError";
+  }
+}
+
+export class ProviderProtectionError extends ProviderFetchError {
+  constructor(message = "LinkedIn rate-limited or challenged the direct request") {
+    super(message);
+    this.name = "ProviderProtectionError";
+  }
+}
+
+export class ProviderCircuitOpenError extends ProviderFetchError {
+  constructor(message = "LinkedIn requests are paused after a protection signal") {
+    super(message);
+    this.name = "ProviderCircuitOpenError";
   }
 }

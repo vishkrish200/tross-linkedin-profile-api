@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const PROFILE_SECTION_ITEM_LIMIT = 50;
+
 const optionalText = z.string().trim().min(1).optional();
 
 export const experienceSchema = z.object({
@@ -39,11 +41,11 @@ export const profileSchema = z.object({
   headline: optionalText,
   location: optionalText,
   about: optionalText,
-  experience: z.array(experienceSchema),
-  education: z.array(educationSchema),
-  skills: z.array(z.string().trim().min(1)),
-  certifications: z.array(certificationSchema),
-  languages: z.array(languageSchema),
+  experience: z.array(experienceSchema).max(PROFILE_SECTION_ITEM_LIMIT),
+  education: z.array(educationSchema).max(PROFILE_SECTION_ITEM_LIMIT),
+  skills: z.array(z.string().trim().min(1)).max(PROFILE_SECTION_ITEM_LIMIT),
+  certifications: z.array(certificationSchema).max(PROFILE_SECTION_ITEM_LIMIT),
+  languages: z.array(languageSchema).max(PROFILE_SECTION_ITEM_LIMIT),
   profileImages: z.array(z.url()),
   warnings: z.array(z.string()),
 });

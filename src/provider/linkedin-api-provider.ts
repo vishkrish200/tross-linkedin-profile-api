@@ -1,8 +1,13 @@
 import { randomBytes } from "node:crypto";
 import {
   countSectionItems,
+  countDeclaredSectionItems,
+  extractAboutComponentRequest,
   extractIdentity,
   extractProfileFromResponses,
+  isKnownEmptyAboutComponent,
+  sectionPageSignature,
+  sectionLimitWarning,
   type LinkedInResponses,
   type LinkedInSection,
 } from "./extract-profile.js";
@@ -10,6 +15,8 @@ import {
   ProviderAuthenticationError,
   ProviderFetchError,
   ProviderNotConfiguredError,
+  ProviderProtectionError,
+  type ProfileFetchOptions,
   type ProfileProvider,
 } from "./profile-provider.js";
 
@@ -18,10 +25,12 @@ export type LinkedInApiProviderConfig = {
   csrfToken?: string;
   userAgent?: string;
   requestTimeoutMs?: number;
+  maxResponseBytes?: number;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   now?: () => Date;
   spanId?: () => string;
+  requestLimiter?: { acquire(signal?: AbortSignal): Promise<void> };
 };
 
 type SectionConfig = {
@@ -31,6 +40,79 @@ type SectionConfig = {
 
 const pageSize = 10;
 const maxPages = 5;
+
+function isKnownEmptySectionResponse(content: string): boolean {
+  return /Nothing to see for now/i.test(content);
+}
+
+function assertNoProtectionPage(content: string): void {
+  if (/<title[^>]*>\s*(?:Sign in|Log in)[^<]*LinkedIn|authwall|login__form/i.test(content)) {
+    throw new ProviderAuthenticationError();
+  }
+  const isHtmlDocument = /<!doctype\s+html|<html\b|<body\b|<form\b/i.test(content);
+  const protectionMarkup = /checkpoint\/challenge|g-recaptcha|(?:id|class|name)=["'][^"']*captcha|<title[^>]*>[^<]*(?:security verification|consent)|<h[1-3][^>]*>[^<]*security verification|consent\.linkedin\.com/i;
+  if (isHtmlDocument && protectionMarkup.test(content)) {
+    throw new ProviderProtectionError();
+  }
+}
+
+type ResponseKind = "profile" | "rsc";
+
+function assertExpectedContentType(response: Response, kind: ResponseKind): void {
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  const allowed = kind === "profile"
+    ? new Set(["text/html", "application/xhtml+xml"])
+    : new Set(["text/x-component", "application/octet-stream"]);
+  if (!contentType || !allowed.has(contentType)) {
+    throw new ProviderFetchError(`LinkedIn returned an unexpected ${kind} content type`);
+  }
+}
+
+async function readLimitedResponse(response: Response, maxBytes: number): Promise<string> {
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new ProviderFetchError("LinkedIn response exceeded the configured size limit");
+  }
+  if (!response.body) return "";
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new ProviderFetchError("LinkedIn response exceeded the configured size limit");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (Number.isFinite(contentLength)
+    && contentLength > 0
+    && !response.headers.has("content-encoding")
+    && total < contentLength) {
+    throw new ProviderFetchError("LinkedIn returned a truncated response body");
+  }
+
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(joined);
+  } catch {
+    throw new ProviderFetchError("LinkedIn returned a malformed UTF-8 response body");
+  }
+}
+
 const sections: Record<LinkedInSection, SectionConfig> = {
   experience: {
     pagerId: "com.linkedin.sdui.pagers.profile.details.experience",
@@ -127,9 +209,14 @@ function sectionBody(
 }
 
 export class LinkedInApiProvider implements ProfileProvider {
-  constructor(private readonly config: LinkedInApiProviderConfig) {}
+  constructor(private readonly config: LinkedInApiProviderConfig) {
+    if (config.maxResponseBytes !== undefined
+      && (!Number.isInteger(config.maxResponseBytes) || config.maxResponseBytes < 1)) {
+      throw new RangeError("LinkedIn response size limit must be a positive integer");
+    }
+  }
 
-  async fetch(profileUrl: string) {
+  async fetch(profileUrl: string, options: ProfileFetchOptions = {}) {
     const cookie = this.config.cookie?.trim();
     if (!cookie) throw new ProviderNotConfiguredError("LINKEDIN_COOKIE is not configured");
 
@@ -156,12 +243,20 @@ export class LinkedInApiProvider implements ProfileProvider {
     const perform = async (url: URL, init: RequestInit): Promise<Response> => {
       let response: Response;
       try {
+        await this.config.requestLimiter?.acquire(options.signal);
+        const requestTimeout = AbortSignal.timeout(this.config.requestTimeoutMs ?? 20_000);
+        const signal = options.signal
+          ? AbortSignal.any([options.signal, requestTimeout])
+          : requestTimeout;
         response = await request(url, {
           ...init,
           redirect: "manual",
-          signal: AbortSignal.timeout(this.config.requestTimeoutMs ?? 20_000),
+          signal,
         });
       } catch (error) {
+        if (options.signal?.aborted && options.signal.reason instanceof Error) {
+          throw options.signal.reason;
+        }
         throw new ProviderFetchError(error instanceof Error ? error.message : undefined);
       }
       const location = response.headers.get("location") ?? "";
@@ -169,10 +264,17 @@ export class LinkedInApiProvider implements ProfileProvider {
         throw new ProviderAuthenticationError();
       }
       if (response.status === 429 || response.status === 999) {
-        throw new ProviderFetchError("LinkedIn rate-limited or challenged the direct request");
+        throw new ProviderProtectionError();
       }
       if (!response.ok) throw new ProviderFetchError(`LinkedIn returned ${response.status}`);
       return response;
+    };
+
+    const readResponse = async (response: Response, kind: ResponseKind): Promise<string> => {
+      const content = await readLimitedResponse(response, this.config.maxResponseBytes ?? 5_000_000);
+      assertNoProtectionPage(content);
+      assertExpectedContentType(response, kind);
+      return content;
     };
 
     const profileEndpoint = new URL(`/in/${encodeURIComponent(vanityName)}/`, baseUrl);
@@ -180,10 +282,42 @@ export class LinkedInApiProvider implements ProfileProvider {
       method: "GET",
       headers: { ...commonHeaders, accept: "text/html,application/xhtml+xml" },
     });
-    const profileHtml = await profileResponse.text();
+    const profileHtml = await readResponse(profileResponse, "profile");
     const identity = extractIdentity(profileHtml);
     if (!identity.profileId) {
       throw new ProviderFetchError("LinkedIn's profile page did not contain a profile identifier");
+    }
+
+    const profileCardResponses: string[] = [];
+    const aboutComponent = extractAboutComponentRequest(profileHtml);
+    if (aboutComponent === null) {
+      throw new ProviderFetchError("LinkedIn returned an unrecognized profile-card response shape");
+    }
+    if (aboutComponent) {
+      const endpoint = new URL("/flagship-web/rsc-action/actions/component", baseUrl);
+      endpoint.searchParams.set("componentId", aboutComponent.componentId);
+      endpoint.searchParams.set("sduiid", aboutComponent.componentId);
+      endpoint.searchParams.set(
+        "parentSpanId",
+        this.config.spanId?.() ?? randomBytes(8).toString("base64"),
+      );
+      const response = await perform(endpoint, {
+        method: "POST",
+        headers: {
+          ...commonHeaders,
+          accept: "text/x-component",
+          "content-type": "application/json",
+          referer: profileEndpoint.toString(),
+          "x-li-rsc-stream": "true",
+        },
+        body: JSON.stringify({ clientArguments: aboutComponent.clientArguments }),
+      });
+      profileCardResponses.push(await readResponse(response, "rsc"));
+    }
+    if (aboutComponent
+      && !extractIdentity(profileHtml, profileCardResponses).about
+      && !profileCardResponses.some(isKnownEmptyAboutComponent)) {
+      throw new ProviderFetchError("LinkedIn's About component did not contain parsable biography text");
     }
 
     const responses: LinkedInResponses = {
@@ -193,8 +327,10 @@ export class LinkedInApiProvider implements ProfileProvider {
       certifications: [],
       languages: [],
     };
+    const extractionWarnings: string[] = [];
 
     for (const section of Object.keys(sections) as LinkedInSection[]) {
+      const pageSignatures = new Set<string>();
       for (let page = 0; page < maxPages; page += 1) {
         const endpoint = new URL("/flagship-web/rsc-action/actions/pagination", baseUrl);
         endpoint.searchParams.set("sduiid", sections[section].pagerId);
@@ -213,9 +349,29 @@ export class LinkedInApiProvider implements ProfileProvider {
           },
           body: JSON.stringify(sectionBody(section, vanityName, identity.profileId, page * pageSize)),
         });
-        const content = await response.text();
+        const content = await readResponse(response, "rsc");
         responses[section].push(content);
-        if (countSectionItems(section, content) < pageSize) break;
+        const itemCount = countSectionItems(section, content);
+        const declaredItemCount = countDeclaredSectionItems(content);
+        if (declaredItemCount > itemCount) {
+          throw new ProviderFetchError(
+            `LinkedIn declared ${declaredItemCount} ${section} items but the parser recovered ${itemCount}`,
+          );
+        }
+        if (itemCount === 0 && !isKnownEmptySectionResponse(content)) {
+          throw new ProviderFetchError(`LinkedIn returned an unrecognized ${section} response shape`);
+        }
+        if (itemCount > 0) {
+          const signature = sectionPageSignature(section, content);
+          if (pageSignatures.has(signature)) {
+            throw new ProviderFetchError(`LinkedIn repeated a ${section} pagination page`);
+          }
+          pageSignatures.add(signature);
+        }
+        if (page === maxPages - 1 && itemCount >= pageSize) {
+          extractionWarnings.push(sectionLimitWarning(section));
+        }
+        if (itemCount < pageSize) break;
       }
     }
 
@@ -224,6 +380,8 @@ export class LinkedInApiProvider implements ProfileProvider {
       responses,
       profileUrl,
       this.config.now?.() ?? new Date(),
+      profileCardResponses,
+      extractionWarnings,
     );
     if (!profile.name && !profile.experience.length && !profile.education.length) {
       throw new ProviderFetchError("LinkedIn's response did not contain profile data");

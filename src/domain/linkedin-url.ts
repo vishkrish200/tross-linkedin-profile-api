@@ -16,7 +16,11 @@ export function normalizeLinkedInProfileUrl(input: string): string {
     throw new InvalidLinkedInProfileUrlError();
   }
 
-  if (url.protocol !== "https:" || !allowedHosts.has(url.hostname.toLowerCase())) {
+  if (url.protocol !== "https:"
+    || !allowedHosts.has(url.hostname.toLowerCase())
+    || url.username
+    || url.password
+    || url.port) {
     throw new InvalidLinkedInProfileUrlError();
   }
 
@@ -25,8 +29,18 @@ export function normalizeLinkedInProfileUrl(input: string): string {
     throw new InvalidLinkedInProfileUrlError();
   }
 
-  const slug = decodeURIComponent(match[1]).trim();
-  if (!slug || slug === "." || slug === "..") {
+  let slug: string;
+  try {
+    slug = decodeURIComponent(match[1]).trim();
+  } catch {
+    throw new InvalidLinkedInProfileUrlError();
+  }
+
+  if (!slug
+    || slug === "."
+    || slug === ".."
+    || slug.length > 100
+    || !/^[\p{L}\p{M}\p{N}._-]+$/u.test(slug)) {
     throw new InvalidLinkedInProfileUrlError();
   }
 

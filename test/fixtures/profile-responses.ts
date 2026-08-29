@@ -89,6 +89,316 @@ export const rootImageProfileHtml = [
   "</body></html>",
 ].join("");
 
+const framedImageProfileStream = flight([
+  ["0", ["$", "main", null, { children: [{
+    source: {
+      renderPayload: {
+        rootUrl: "https://media.example.test/profile-displayphoto-shrink_",
+        imageRenditions: [
+          { width: 100, height: 100, suffixUrl: "100_100/fallback-small.jpg" },
+          { width: 400, height: 400, suffixUrl: "400_400/fallback-large.jpg" },
+        ],
+      },
+    },
+  }] }]],
+  ["1", ["$", "div", null, { children: [
+    textElement("Framed Image Engineer"),
+    textElement("Example Company"),
+    textElement("Example City, India"),
+    textElement("Contact info"),
+    {
+      source: {
+        renderPayload: {
+          rootUrl: "https://media.example.test/profile-framedphoto-shrink_",
+          imageRenditions: [
+            { width: 100, height: 100, suffixUrl: "100_100/framed-small.jpg" },
+            { width: 560, height: 560, suffixUrl: "560_560/framed-large.jpg" },
+          ],
+        },
+      },
+    },
+  ] }]],
+  ["2", textElement("Framed Image Person")],
+  ["3", { payload: { vanityName: "framed-image-person", profileId: "profile-framed-image" } }],
+]);
+
+export const framedImageProfileHtml = [
+  "<!doctype html><html><head><title>Framed Image Person | LinkedIn</title></head><body>",
+  `<script id="rehydrate-data">window.__como_rehydration__ = ${JSON.stringify([framedImageProfileStream])};</script>`,
+  "</body></html>",
+].join("");
+
+const lazyAboutProfileStream = flight([
+  ["0", ["$", "main", null, { children: [
+    itemElement([
+      "Lazy About Engineer",
+      "Example Company",
+      "Example City, India",
+      "Contact info",
+    ]),
+    ["$", "LazyCard", "profile-about", {
+      componentKey: "profileCardsAboveActivityTopcardOnlyexample-person",
+      children: ["$", "LazyRender", "profile-about", { initialContent: "$2" }],
+    }],
+  ] }]],
+  ["2", ["$", "div", null, {
+    screenId: "com.linkedin.sdui.flagshipnav.profile.Profile",
+    children: [],
+    action: {
+      content: {
+        $case: "asyncContent",
+        asyncContent: {
+          newComponentId: "com.linkedin.sdui.profile.card.about",
+          requestedArguments: {
+            requestedStateKeys: [],
+            payload: { vanityName: "lazy-about-person" },
+            requestMetadata: { $type: "proto.sdui.common.RequestMetadata" },
+          },
+        },
+      },
+    },
+  }]],
+  ["3", { payload: { vanityName: "lazy-about-person", profileId: "profile-lazy-about" } }],
+]);
+
+export const lazyAboutProfileHtml = [
+  "<!doctype html><html><head><title>Lazy About Person | LinkedIn</title></head><body>",
+  `<script id="rehydrate-data">window.__como_rehydration__ = ${JSON.stringify([lazyAboutProfileStream])};</script>`,
+  "</body></html>",
+].join("");
+
+export const lazyAboutShapeDriftProfileHtml = lazyAboutProfileHtml.replace(
+  '\\"$case\\":\\"asyncContent\\"',
+  '\\"$case\\":\\"unknownContent\\"',
+);
+
+export const lazyAboutComponentFlight = flight([
+  ["0", itemElement([
+    "About",
+    "I build dependable systems and test them with carefully designed, reproducible evaluations.",
+    "Top skills",
+    "Systems Design",
+  ])],
+]);
+
+export const explicitlyEmptyAboutComponentFlight = flight([
+  ["0", ["$", "div", null, {
+    "data-sdui-component": "profile-cards",
+    children: [false, [
+      ["$", "div", null, { children: [] }],
+    ]],
+  }]],
+]);
+
+export const multiParagraphAboutComponentFlight = flight([
+  ["0", itemElement([
+    "About",
+    "I build dependable systems for high-stakes workflows.",
+    "I validate those systems with deterministic evaluations and privacy-minimized live checks.",
+    "I document residual risks before recommending a release.",
+    "Top skills",
+    "Systems Design",
+    "Evaluation",
+  ])],
+]);
+
+export const shortAboutComponentFlight = flight([
+  ["0", itemElement([
+    "About",
+    "Build. Learn. Share.",
+  ])],
+]);
+
+export const emptyChildrenAboutComponentFlight = flight([
+  ["0", ["$", "LazyCard", null, {
+    children: [],
+    initialContent: itemElement([
+      "About",
+      "A dedicated initial-content biography remains authoritative when children is empty.",
+    ]),
+  }]],
+]);
+
+export const singleCharacterAboutComponentFlight = flight([
+  ["0", itemElement(["About", "X"])],
+]);
+
+export const boundaryWordAboutComponentFlight = flight([
+  ["0", itemElement(["About", "Featured"])],
+]);
+
+export const internationalAboutComponentFlight = flight([
+  ["0", itemElement([
+    "About",
+    "  Build carefully.  ",
+    "مرحبا بالعالم",
+    "構築と検証",
+    "Cafe\u0301\u200B 🚀",
+    "Top skills",
+    "Testing",
+  ])],
+]);
+
+export const whitespaceOnlyAboutComponentFlight = flight([
+  ["0", itemElement(["About", "  \n\t  "])],
+]);
+
+export const duplicateSkillRowsFlight = flight([
+  ["4", textElement("TypeScript")],
+  ["5", textElement("TypeScript")],
+  ["6", textElement("Rust")],
+]);
+
+export const renewedCertificationsFlight = flight([
+  ["4", itemElement([
+    "Cloud Engineer",
+    "Example Cloud",
+    "Issued Jan 2024",
+    "Credential ID RENEWAL-ONE",
+  ])],
+  ["5", itemElement([
+    "Cloud Engineer",
+    "Example Cloud",
+    "Issued Jan 2026",
+    "Credential ID RENEWAL-TWO",
+  ])],
+]);
+
+export const sameCoreExperienceFlight = flight([
+  ["4", itemElement([
+    "Advisor",
+    "Example Company · Contract",
+    "Jan 2025 - Present",
+    "Remote",
+  ])],
+  ["6", itemElement([
+    "Advisor",
+    "Example Company · Contract",
+    "Jan 2025 - Present",
+    "Example City · Hybrid",
+  ])],
+]);
+
+const unsafeImageProfileStream = flight([
+  ["0", ["$", "main", null, { children: [{
+    source: {
+      renderPayload: {
+        rootUrl: "javascript:profile-framedphoto-",
+        imageRenditions: [{ width: 400, suffixUrl: "unsafe" }],
+      },
+    },
+  }] }]],
+  ["1", itemElement(["Security Engineer", "Example City", "Contact info"])],
+  ["2", { payload: { vanityName: "unsafe-image", profileId: "profile-unsafe-image" } }],
+]);
+
+export const unsafeImageProfileHtml = [
+  "<!doctype html><html><head><title>Unsafe Image | LinkedIn</title></head><body>",
+  `<script id="rehydrate-data">window.__como_rehydration__ = ${JSON.stringify([unsafeImageProfileStream])};</script>`,
+  "</body></html>",
+].join("");
+
+const partialImageProfileStream = flight([
+  ["0", ["$", "main", null, { children: [{
+    source: {
+      renderPayload: {
+        rootUrl: "https://media.example.test/profile-displayphoto-shrink_",
+        imageRenditions: [
+          { width: 100 },
+          { width: 200, suffixUrl: "not a valid URL" },
+          { width: 400, suffixUrl: "400_400/valid.jpg" },
+        ],
+      },
+    },
+  }] }]],
+  ["1", itemElement(["Image Engineer", "Example City", "Contact info"])],
+  ["2", { payload: { vanityName: "partial-image", profileId: "profile-partial-image" } }],
+]);
+
+export const partialImageProfileHtml = [
+  "<!doctype html><html><head><title>Partial Image | LinkedIn</title></head><body>",
+  `<script id="rehydrate-data">window.__como_rehydration__ = ${JSON.stringify([partialImageProfileStream])};</script>`,
+  "</body></html>",
+].join("");
+
+export const cyclicFlight = flight([
+  ["0", ["$", "div", null, { children: "$1" }]],
+  ["1", ["$", "div", null, { children: "$0" }]],
+]);
+
+export const undatedExperienceFlight = flight([
+  ["0", itemElement([
+    "Experience",
+    collectionMarker("undated-independent"),
+    "Independent Researcher",
+  ])],
+]);
+
+export const delimiterCompanyExperienceFlight = flight([
+  ["0", itemElement([
+    "Experience",
+    collectionMarker("delimiter-company"),
+    "Research Engineer",
+    "Research · Development Labs · Contract",
+    "Remote",
+    "Designed a deterministic evaluation system without relying on a date range.",
+  ])],
+]);
+
+export const careerBreakExperienceFlight = flight([
+  ["0", itemElement([
+    "Experience",
+    collectionMarker("career-break"),
+    "Career Break",
+    "Jan 2024 - Jun 2024 · 6 mos",
+    "Focused on personal development and independent study.",
+  ])],
+]);
+
+export const plainDescriptionExperienceFlight = flight([
+  ["4", itemElement([
+    "Platform Engineer",
+    "Example Systems · Full-time",
+    "Jan 2025 - Present",
+    "Remote",
+  ])],
+  ["5", itemElement(["Designed resilient systems without bullet prefixes."])],
+]);
+
+export const multipleDegreesEducationFlight = flight([
+  ["0", itemElement([
+    "Education",
+    collectionMarker("degree-one"),
+    "Example University",
+    "Bachelor of Arts, Economics, Mathematics",
+    "2018 – 2022",
+    collectionMarker("degree-two"),
+    "Example University",
+    "Master of Science, Computer Science",
+    "2022 – 2024",
+  ])],
+]);
+
+export function skillsPageFlight(prefix: string, count = 10): string {
+  return flight(Array.from({ length: count }, (_, index) => [
+    (index + 4).toString(16),
+    textElement(`${prefix}-${index + 1}`),
+  ]));
+}
+
+export function partiallyParsedSkillsFlight(declaredCount: number, parsedCount: number): string {
+  return flight([
+    ["0", itemElement([
+      "Skills",
+      ...Array.from({ length: declaredCount }, (_, index) => collectionMarker(`skill-${index}`)),
+    ])],
+    ...Array.from({ length: parsedCount }, (_, index) => [
+      (index + 4).toString(16),
+      textElement(`parsed-skill-${index + 1}`),
+    ] as [string, unknown]),
+  ]);
+}
+
 export const experienceFlight = flight([
   ["4", itemElement([
     "Senior Software Engineer",
@@ -118,6 +428,30 @@ export const groupedExperienceFlight = flight([
     "Built the first version of the product.",
     "Skills:",
     "Product Management",
+  ])],
+  ["4", itemElement([
+    "Senior Product Manager",
+    "Example Company · Full-time",
+    "Jan 2023 - Present · 3 yrs",
+    "Remote",
+  ])],
+  ["6", textElement("Experience")],
+]);
+
+export const descriptionWithoutLocationExperienceFlight = flight([
+  ["0", itemElement([
+    "Experience",
+    collectionMarker("description-without-location"),
+    "Research Engineer",
+    "Example Research · Contract",
+    "Jan 2025 - Jun 2025 · 6 mos",
+    "Designed the first evaluation suite.",
+    "Published reproducible results.",
+  ])],
+  ["4", itemElement([
+    "Research Engineer",
+    "Example Research · Contract",
+    "Jan 2025 - Jun 2025 · 6 mos",
   ])],
   ["6", textElement("Experience")],
 ]);
@@ -162,20 +496,58 @@ function collectionMarker(id: string) {
   });
 }
 
+function credentialLinkElement(target: string) {
+  const url = new URL("https://www.linkedin.com/safety/go/");
+  url.searchParams.set("url", target);
+  url.searchParams.set("urlhash", "test");
+  return ["$", "a", null, {
+    children: ["Show credential"],
+    action: { value: { content: { url: { urlValue: { url: url.toString() } } } } },
+  }];
+}
+
+export const unsafeCredentialFlight = flight([
+  ["0", ["$", "div", null, { children: [
+    ...[
+      "Licenses & certifications",
+      collectionMarker("unsafe-one"),
+      "Security Certificate",
+      "Example Issuer",
+      "Issued Jan 2025",
+    ].map(textElement),
+    credentialLinkElement("javascript:alert(1)"),
+    ...[
+      collectionMarker("unsafe-two"),
+      "Identity Certificate",
+      "Example Issuer",
+      "Issued Feb 2025",
+    ].map(textElement),
+    credentialLinkElement("https://user:password@credentials.example.test/two"),
+  ] }]],
+]);
+
 export const liveShapedCertificationsFlight = flight([
-  ["0", itemElement([
-    "Licenses & certifications",
-    collectionMarker("one"),
-    "Machine Learning Associate",
-    "Example Cloud",
-    "Issued Nov 2024 · Expires Nov 2026",
-    collectionMarker("two"),
-    "Generative AI Professional",
-    "Example Cloud",
-    "Issued Oct 2024",
-    "Skills:",
-    "Artificial Intelligence, Machine Learning",
-  ])],
+  ["0", ["$", "div", null, { children: [
+    ...[
+      "Licenses & certifications",
+      collectionMarker("one"),
+      "Machine Learning Associate",
+      "Example Cloud",
+      "Issued Nov 2024 · Expires Nov 2026",
+    ].map(textElement),
+    credentialLinkElement("https://credentials.example.test/cert/one"),
+    ...[
+      collectionMarker("two"),
+      "Generative AI Professional",
+      "Example Cloud",
+      "Issued Oct 2024",
+    ].map(textElement),
+    credentialLinkElement("http://credentials.example.test/cert/two"),
+    ...[
+      "Skills:",
+      "Artificial Intelligence, Machine Learning",
+    ].map(textElement),
+  ] }]],
   ["6", textElement("Licenses & certifications")],
   ["8", textElement("Machine Learning Associate")],
   ["9", textElement("Example Cloud")],
@@ -233,3 +605,7 @@ export const languagesFlight = flight([
 ]);
 
 export const emptyFlight = "0:" + JSON.stringify(textElement("Nothing to see for now"));
+
+export const responseShapeDriftFlight = flight([
+  ["0", itemElement(["Experience", "Unknown response wrapper"])],
+]);

@@ -12,8 +12,8 @@ const provider = new LinkedInApiProvider({
 });
 
 const profile = profileSchema.parse(await provider.fetch(normalizeLinkedInProfileUrl(profileUrl)));
-console.log(JSON.stringify(process.env.SMOKE_SUMMARY ? {
-  sourceUrl: profile.sourceUrl,
+console.log(JSON.stringify({
+  profileSlug: new URL(profile.sourceUrl).pathname.split("/").filter(Boolean).at(-1),
   fields: {
     name: Boolean(profile.name),
     headline: Boolean(profile.headline),
@@ -29,4 +29,7 @@ console.log(JSON.stringify(process.env.SMOKE_SUMMARY ? {
     profileImages: profile.profileImages.length,
     warnings: profile.warnings.length,
   },
-} : profile, null, 2));
+  possiblyTruncatedSections: profile.warnings
+    .filter((warning) => warning.includes("50-item safety limit"))
+    .map((warning) => warning.split(" ", 1)[0]),
+}, null, 2));

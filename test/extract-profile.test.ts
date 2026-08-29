@@ -1,26 +1,53 @@
 import { describe, expect, it } from "vitest";
 import {
   countSectionItems,
+  extractAboutComponentRequest,
   extractCertifications,
   extractEducation,
   extractExperience,
   extractIdentity,
   extractLanguages,
   extractProfileFromResponses,
+  isKnownEmptyAboutComponent,
 } from "../src/provider/extract-profile.js";
 import {
   certificationsFlight,
+  boundaryWordAboutComponentFlight,
+  careerBreakExperienceFlight,
+  cyclicFlight,
+  delimiterCompanyExperienceFlight,
+  descriptionWithoutLocationExperienceFlight,
+  duplicateSkillRowsFlight,
   educationFlight,
+  emptyChildrenAboutComponentFlight,
+  explicitlyEmptyAboutComponentFlight,
   experienceFlight,
+  framedImageProfileHtml,
   groupedExperienceFlight,
+  internationalAboutComponentFlight,
   languagesFlight,
+  lazyAboutComponentFlight,
+  lazyAboutProfileHtml,
+  lazyAboutShapeDriftProfileHtml,
   liveShapedCertificationsFlight,
   liveShapedEducationWithoutDatesFlight,
   liveShapedLanguagesFlight,
   liveShapedProfileHtml,
+  multiParagraphAboutComponentFlight,
+  multipleDegreesEducationFlight,
+  partialImageProfileHtml,
+  plainDescriptionExperienceFlight,
   profileHtml,
+  renewedCertificationsFlight,
   rootImageProfileHtml,
+  sameCoreExperienceFlight,
+  singleCharacterAboutComponentFlight,
+  shortAboutComponentFlight,
   skillsFlight,
+  unsafeImageProfileHtml,
+  unsafeCredentialFlight,
+  undatedExperienceFlight,
+  whitespaceOnlyAboutComponentFlight,
 } from "./fixtures/profile-responses.js";
 
 describe("LinkedIn React Flight extraction", () => {
@@ -61,6 +88,86 @@ describe("LinkedIn React Flight extraction", () => {
     });
   });
 
+  it("prefers a framed owner photo attached to the profile header", () => {
+    expect(extractIdentity(framedImageProfileHtml).profileImages).toEqual([
+      "https://media.example.test/profile-framedphoto-shrink_100_100/framed-small.jpg",
+      "https://media.example.test/profile-framedphoto-shrink_560_560/framed-large.jpg",
+    ]);
+  });
+
+  it("extracts About text from LinkedIn's lazy component-card shape", () => {
+    expect(extractAboutComponentRequest(lazyAboutProfileHtml)).toEqual({
+      componentId: "com.linkedin.sdui.profile.card.about",
+      clientArguments: {
+        payload: { vanityName: "lazy-about-person" },
+        states: [],
+        requestMetadata: { $type: "proto.sdui.common.RequestMetadata" },
+        screenId: "com.linkedin.sdui.flagshipnav.profile.Profile",
+        knownTemplateIds: [],
+      },
+    });
+    expect(extractIdentity(lazyAboutProfileHtml, [lazyAboutComponentFlight])).toEqual({
+      profileId: "profile-lazy-about",
+      name: "Lazy About Person",
+      headline: "Lazy About Engineer",
+      location: "Example City, India",
+      about: "I build dependable systems and test them with carefully designed, reproducible evaluations.",
+      profileImages: [],
+    });
+  });
+
+  it("joins every About paragraph before the Top skills boundary", () => {
+    expect(extractIdentity(lazyAboutProfileHtml, [multiParagraphAboutComponentFlight]).about).toBe(
+      "I build dependable systems for high-stakes workflows. "
+      + "I validate those systems with deterministic evaluations and privacy-minimized live checks. "
+      + "I document residual risks before recommending a release.",
+    );
+  });
+
+  it("prefers an authoritative short About card over page-level About text", () => {
+    expect(extractIdentity(profileHtml, [shortAboutComponentFlight]).about).toBe(
+      "Build. Learn. Share.",
+    );
+  });
+
+  it("uses initialContent when a lazy card advertises empty children", () => {
+    expect(extractIdentity(lazyAboutProfileHtml, [emptyChildrenAboutComponentFlight]).about).toBe(
+      "A dedicated initial-content biography remains authoritative when children is empty.",
+    );
+  });
+
+  it("preserves short, international, and label-like biographies", () => {
+    expect(extractIdentity(lazyAboutProfileHtml, [singleCharacterAboutComponentFlight]).about)
+      .toBe("X");
+    expect(extractIdentity(lazyAboutProfileHtml, [boundaryWordAboutComponentFlight]).about)
+      .toBe("Featured");
+    expect(extractIdentity(lazyAboutProfileHtml, [internationalAboutComponentFlight]).about)
+      .toBe("Build carefully. مرحبا بالعالم 構築と検証 Cafe\u0301\u200B 🚀");
+    expect(extractIdentity(lazyAboutProfileHtml, [whitespaceOnlyAboutComponentFlight]).about)
+      .toBeUndefined();
+  });
+
+  it("distinguishes an explicitly empty About card from an unknown response", () => {
+    expect(isKnownEmptyAboutComponent(explicitlyEmptyAboutComponentFlight)).toBe(true);
+    expect(isKnownEmptyAboutComponent('0:["$","div",null,{"children":["About"]}]'))
+      .toBe(false);
+  });
+
+  it("rejects non-HTTPS structured image candidates", () => {
+    expect(extractIdentity(unsafeImageProfileHtml).profileImages).toEqual([]);
+  });
+
+  it("keeps only valid same-origin HTTPS image renditions", () => {
+    expect(extractIdentity(partialImageProfileHtml).profileImages).toEqual([
+      "https://media.example.test/profile-displayphoto-shrink_400_400/valid.jpg",
+    ]);
+  });
+
+  it("distinguishes a changed lazy-card contract from a layout without that wrapper", () => {
+    expect(extractAboutComponentRequest(lazyAboutShapeDriftProfileHtml)).toBeNull();
+    expect(extractAboutComponentRequest(profileHtml)).toBeUndefined();
+  });
+
   it("extracts multiple roles grouped under one company", () => {
     expect(extractExperience(groupedExperienceFlight)).toEqual([
       {
@@ -83,20 +190,100 @@ describe("LinkedIn React Flight extraction", () => {
     expect(countSectionItems("experience", groupedExperienceFlight)).toBe(2);
   });
 
+  it("keeps description paragraphs out of location when the flat row has no location", () => {
+    expect(extractExperience(descriptionWithoutLocationExperienceFlight)).toEqual([{
+      title: "Research Engineer",
+      company: "Example Research",
+      employmentType: "Contract",
+      dateRange: "Jan 2025 - Jun 2025",
+      description: "Designed the first evaluation suite. Published reproducible results.",
+    }]);
+  });
+
+  it("preserves same-title engagements that differ in location", () => {
+    expect(extractExperience(sameCoreExperienceFlight)).toHaveLength(2);
+    expect(extractExperience(sameCoreExperienceFlight).map((item) => item.location)).toEqual([
+      "Remote",
+      "Example City · Hybrid",
+    ]);
+  });
+
+  it("preserves undated roles, career breaks, delimiter-bearing companies, and plain descriptions", () => {
+    expect(extractExperience(undatedExperienceFlight)).toEqual([
+      { title: "Independent Researcher" },
+    ]);
+    expect(extractExperience(delimiterCompanyExperienceFlight)).toEqual([{
+      title: "Research Engineer",
+      company: "Research · Development Labs",
+      employmentType: "Contract",
+      location: "Remote",
+      description: "Designed a deterministic evaluation system without relying on a date range.",
+    }]);
+    expect(extractExperience(careerBreakExperienceFlight)).toEqual([{
+      title: "Career Break",
+      dateRange: "Jan 2024 - Jun 2024",
+      description: "Focused on personal development and independent study.",
+    }]);
+    expect(extractExperience(plainDescriptionExperienceFlight)[0]?.description).toBe(
+      "Designed resilient systems without bullet prefixes.",
+    );
+  });
+
   it("groups current certification rows by LinkedIn collection metadata", () => {
     expect(extractCertifications(liveShapedCertificationsFlight)).toEqual([
       {
         name: "Machine Learning Associate",
         issuer: "Example Cloud",
         issued: "Nov 2024 · Expires Nov 2026",
+        credentialUrl: "https://credentials.example.test/cert/one",
       },
       {
         name: "Generative AI Professional",
         issuer: "Example Cloud",
         issued: "Oct 2024",
+        credentialUrl: "http://credentials.example.test/cert/two",
       },
     ]);
     expect(countSectionItems("certifications", liveShapedCertificationsFlight)).toBe(2);
+  });
+
+  it("preserves renewed certifications with the same name and issuer", () => {
+    const profile = extractProfileFromResponses(
+      profileHtml,
+      {
+        experience: [], education: [], skills: [],
+        certifications: [renewedCertificationsFlight], languages: [],
+      },
+      "https://www.linkedin.com/in/vishnu-example/",
+    );
+    expect(profile.certifications).toHaveLength(2);
+    expect(profile.certifications.map((item) => item.credentialId)).toEqual([
+      "RENEWAL-ONE",
+      "RENEWAL-TWO",
+    ]);
+  });
+
+  it("rejects unsafe or credential-bearing certification redirect targets", () => {
+    expect(extractCertifications(unsafeCredentialFlight)).toEqual([
+      {
+        name: "Security Certificate",
+        issuer: "Example Issuer",
+        issued: "Jan 2025",
+      },
+      {
+        name: "Identity Certificate",
+        issuer: "Example Issuer",
+        issued: "Feb 2025",
+      },
+    ]);
+  });
+
+  it("skips duplicate text echoes without truncating later items", () => {
+    expect(countSectionItems("skills", duplicateSkillRowsFlight)).toBe(2);
+  });
+
+  it("bounds cyclic React Flight references without hanging", () => {
+    expect(countSectionItems("skills", cyclicFlight)).toBe(0);
   });
 
   it("keeps education entries when LinkedIn omits their date ranges", () => {
@@ -120,6 +307,23 @@ describe("LinkedIn React Flight extraction", () => {
       },
     ]);
     expect(countSectionItems("education", liveShapedEducationWithoutDatesFlight)).toBe(3);
+  });
+
+  it("preserves multiple degrees at one school and commas inside field names", () => {
+    expect(extractEducation(multipleDegreesEducationFlight)).toEqual([
+      {
+        school: "Example University",
+        degree: "Bachelor of Arts",
+        fieldOfStudy: "Economics, Mathematics",
+        dateRange: "2018 – 2022",
+      },
+      {
+        school: "Example University",
+        degree: "Master of Science",
+        fieldOfStudy: "Computer Science",
+        dateRange: "2022 – 2024",
+      },
+    ]);
   });
 
   it("groups language proficiency with its language", () => {

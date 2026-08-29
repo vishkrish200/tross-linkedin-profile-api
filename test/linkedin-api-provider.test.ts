@@ -4,14 +4,22 @@ import {
   ProviderAuthenticationError,
   ProviderFetchError,
   ProviderNotConfiguredError,
+  ProviderProtectionError,
 } from "../src/provider/profile-provider.js";
 import {
   certificationsFlight,
   educationFlight,
   emptyFlight,
+  explicitlyEmptyAboutComponentFlight,
   experienceFlight,
   languagesFlight,
+  lazyAboutComponentFlight,
+  lazyAboutProfileHtml,
+  lazyAboutShapeDriftProfileHtml,
   profileHtml,
+  partiallyParsedSkillsFlight,
+  responseShapeDriftFlight,
+  skillsPageFlight,
   skillsFlight,
 } from "./fixtures/profile-responses.js";
 
@@ -22,6 +30,21 @@ const sectionResponses: Record<string, string> = {
   certifications: certificationsFlight,
   languages: languagesFlight,
 };
+
+function typedResponse(
+  body: BodyInit | null,
+  contentType: string,
+  init: ResponseInit = {},
+): Response {
+  const headers = new Headers(init.headers);
+  headers.set("content-type", contentType);
+  return new Response(body, { ...init, headers });
+}
+
+const htmlResponse = (body: BodyInit | null, init?: ResponseInit) =>
+  typedResponse(body, "text/html", init);
+const rscResponse = (body: BodyInit | null, init?: ResponseInit) =>
+  typedResponse(body, "text/x-component", init);
 
 function successfulFetch() {
   return vi.fn<typeof fetch>(async (input) => {
@@ -79,6 +102,100 @@ describe("LinkedInApiProvider", () => {
     });
   });
 
+  it("loads and extracts the lazy About profile card through the component action", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/lazy-about-person/") {
+        return htmlResponse(lazyAboutProfileHtml, { status: 200 });
+      }
+      if (url.pathname.endsWith("/rsc-action/actions/component")) {
+        return rscResponse(lazyAboutComponentFlight, { status: 200 });
+      }
+      return rscResponse(emptyFlight, { status: 200 });
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      baseUrl: "https://linkedin.example.test",
+      fetchImpl,
+      spanId: () => "span-id",
+    });
+
+    const profile = await provider.fetch("https://www.linkedin.com/in/lazy-about-person/");
+    expect(profile.about).toBe(
+      "I build dependable systems and test them with carefully designed, reproducible evaluations.",
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(7);
+    const [componentUrl, componentInit] = fetchImpl.mock.calls[1]!;
+    expect(String(componentUrl)).toContain("/flagship-web/rsc-action/actions/component");
+    expect(String(componentUrl)).toContain("componentId=com.linkedin.sdui.profile.card.about");
+    expect(componentInit).toMatchObject({ method: "POST", redirect: "manual" });
+    expect(JSON.parse(String(componentInit?.body))).toEqual({
+      clientArguments: {
+        payload: { vanityName: "lazy-about-person" },
+        states: [],
+        requestMetadata: { $type: "proto.sdui.common.RequestMetadata" },
+        screenId: "com.linkedin.sdui.flagshipnav.profile.Profile",
+        knownTemplateIds: [],
+      },
+    });
+  });
+
+  it("fails loud when an advertised About component no longer contains parsable text", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/lazy-about-person/") return htmlResponse(lazyAboutProfileHtml);
+      if (url.pathname.endsWith("/rsc-action/actions/component")) {
+        return rscResponse("0:[\"$\",\"div\",null,{\"children\":[\"About\"]}]");
+      }
+      return rscResponse(emptyFlight);
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      baseUrl: "https://linkedin.example.test",
+      fetchImpl,
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/lazy-about-person/"))
+      .rejects.toThrow("About component did not contain parsable biography text");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts an advertised About card that is explicitly empty before neighboring cards", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/lazy-about-person/") return htmlResponse(lazyAboutProfileHtml);
+      if (url.pathname.endsWith("/rsc-action/actions/component")) {
+        return rscResponse(explicitlyEmptyAboutComponentFlight);
+      }
+      return rscResponse(emptyFlight);
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      baseUrl: "https://linkedin.example.test",
+      fetchImpl,
+    });
+
+    const profile = await provider.fetch("https://www.linkedin.com/in/lazy-about-person/");
+    expect(profile.about).toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledTimes(7);
+  });
+
+  it("fails closed when the lazy profile-card request contract changes shape", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      htmlResponse(lazyAboutShapeDriftProfileHtml, { status: 200 }),
+    );
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/lazy-about-person/")).rejects.toMatchObject({
+      name: "ProviderFetchError",
+      message: "LinkedIn returned an unrecognized profile-card response shape",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("fails before network access when no session cookie is configured", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     const provider = new LinkedInApiProvider({ fetchImpl });
@@ -88,14 +205,393 @@ describe("LinkedInApiProvider", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("maps LinkedIn authentication failures to the public provider error", async () => {
+  it.each([401, 403])("maps LinkedIn HTTP %s to the authentication error", async (status) => {
     const provider = new LinkedInApiProvider({
       cookie: 'li_at=expired; JSESSIONID="ajax:csrf"',
-      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 403 })),
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status })),
     });
     await expect(provider.fetch("https://www.linkedin.com/in/example/")).rejects.toBeInstanceOf(
       ProviderAuthenticationError,
     );
+  });
+
+  it.each(["/login?sessionExpired=1", "/checkpoint/challenge/"])(
+    "maps an authentication redirect to the authentication error: %s",
+    async (location) => {
+      const provider = new LinkedInApiProvider({
+        cookie: 'li_at=expired; JSESSIONID="ajax:csrf"',
+        fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+          new Response(null, { status: 302, headers: { location } }),
+        ),
+      });
+      await expect(provider.fetch("https://www.linkedin.com/in/example/")).rejects.toBeInstanceOf(
+        ProviderAuthenticationError,
+      );
+    },
+  );
+
+  it.each([429, 999])("maps LinkedIn HTTP %s to a non-retrying fetch error", async (status) => {
+    const response = status === 999
+      ? { status, ok: false, headers: new Headers() } as Response
+      : new Response(null, { status });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(response),
+    });
+    await expect(provider.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toBeInstanceOf(ProviderProtectionError);
+  });
+
+  it("detects an authentication wall returned with HTTP 200", async () => {
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=expired; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+        new Response("<html><title>Sign in | LinkedIn</title><form class=\"login__form\"></form></html>"),
+      ),
+    });
+    await expect(provider.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toBeInstanceOf(ProviderAuthenticationError);
+  });
+
+  it("detects a challenge page returned with HTTP 200", async () => {
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+        new Response("<html><body>Security verification checkpoint/challenge</body></html>"),
+      ),
+    });
+    await expect(provider.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toBeInstanceOf(ProviderProtectionError);
+  });
+
+  it("detects a consent wall returned with HTTP 200", async () => {
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+        htmlResponse("<html><head><title>Consent | LinkedIn</title></head><body></body></html>"),
+      ),
+    });
+    await expect(provider.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toBeInstanceOf(ProviderProtectionError);
+  });
+
+  it("does not treat ordinary profile text about security verification as a challenge", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") {
+        return htmlResponse(profileHtml.replace(
+          "</body>",
+          "<p>I build tools for security verification.</p></body>",
+        ));
+      }
+      return rscResponse(emptyFlight);
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/vishnu-example/"))
+      .resolves.toMatchObject({ name: "Vishnu Example" });
+  });
+
+  it("rejects an unexpected successful-response content type", async () => {
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(profileHtml, { headers: { "content-type": "application/json" } }),
+      ),
+    });
+    await expect(provider.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toThrow("unexpected profile content type");
+  });
+
+  it("rejects a missing content type and malformed UTF-8", async () => {
+    const missingType = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(new TextEncoder().encode(profileHtml)),
+      ),
+    });
+    await expect(missingType.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toThrow("unexpected profile content type");
+
+    const malformed = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+        htmlResponse(new Uint8Array([0xc3, 0x28])),
+      ),
+    });
+    await expect(malformed.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toThrow("malformed UTF-8 response body");
+  });
+
+  it("rejects oversized and truncated successful responses", async () => {
+    const oversized = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      maxResponseBytes: 64,
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(htmlResponse(profileHtml)),
+    });
+    await expect(oversized.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toThrow("exceeded the configured size limit");
+
+    const byteLength = new TextEncoder().encode(profileHtml).byteLength;
+    const truncated = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(htmlResponse(profileHtml, {
+        headers: { "content-length": String(byteLength + 10) },
+      })),
+    });
+    await expect(truncated.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toThrow("truncated response body");
+  });
+
+  it("maps an upstream timeout to the non-retrying fetch error", async () => {
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockRejectedValue(new DOMException("The operation timed out", "TimeoutError")),
+    });
+    await expect(provider.fetch("https://www.linkedin.com/in/example/")).rejects.toMatchObject({
+      name: "ProviderFetchError",
+      message: "The operation timed out",
+    });
+  });
+
+  it("rejects a deleted profile response", async () => {
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 404 })),
+    });
+    await expect(provider.fetch("https://www.linkedin.com/in/deleted-profile/")).rejects.toMatchObject({
+      name: "ProviderFetchError",
+      message: "LinkedIn returned 404",
+    });
+  });
+
+  it("fails closed when a section response changes shape instead of treating it as empty", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") {
+        return htmlResponse(profileHtml, { status: 200 });
+      }
+      const pagerId = url.searchParams.get("sduiid") ?? "";
+      return rscResponse(
+        pagerId.endsWith(".experience") ? responseShapeDriftFlight : emptyFlight,
+        { status: 200 },
+      );
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/vishnu-example/")).rejects.toMatchObject({
+      name: "ProviderFetchError",
+      message: "LinkedIn returned an unrecognized experience response shape",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed when a later pagination page changes shape", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") return htmlResponse(profileHtml);
+      const pagerId = url.searchParams.get("sduiid") ?? "";
+      if (!pagerId.endsWith(".skills")) return rscResponse(emptyFlight);
+      const start = Number(JSON.parse(String(init?.body)).clientArguments.payload.start);
+      return rscResponse(start === 0 ? skillsPageFlight("page-one") : responseShapeDriftFlight);
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/vishnu-example/"))
+      .rejects.toMatchObject({
+        name: "ProviderFetchError",
+        message: "LinkedIn returned an unrecognized skills response shape",
+      });
+  });
+
+  it("fails closed when LinkedIn declares more items than the parser recovers", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") return htmlResponse(profileHtml);
+      const pagerId = url.searchParams.get("sduiid") ?? "";
+      return rscResponse(
+        pagerId.endsWith(".skills") ? partiallyParsedSkillsFlight(10, 8) : emptyFlight,
+      );
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/vishnu-example/"))
+      .rejects.toThrow("declared 10 skills items but the parser recovered 8");
+  });
+
+  it("rejects a repeated pagination page", async () => {
+    const repeated = skillsPageFlight("repeated");
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") return htmlResponse(profileHtml);
+      const pagerId = url.searchParams.get("sduiid") ?? "";
+      return rscResponse(pagerId.endsWith(".skills") ? repeated : emptyFlight);
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/vishnu-example/"))
+      .rejects.toMatchObject({
+        name: "ProviderFetchError",
+        message: "LinkedIn repeated a skills pagination page",
+      });
+  });
+
+  it("marks a full fifth page as possibly truncated", async () => {
+    const limiter = { acquire: vi.fn(async () => {}) };
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") return htmlResponse(profileHtml);
+      const pagerId = url.searchParams.get("sduiid") ?? "";
+      if (!pagerId.endsWith(".skills")) return rscResponse(emptyFlight);
+      const start = Number(JSON.parse(String(init?.body)).clientArguments.payload.start);
+      return rscResponse(skillsPageFlight(`page-${start / 10}`));
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+      requestLimiter: limiter,
+    });
+
+    const profile = await provider.fetch("https://www.linkedin.com/in/vishnu-example/");
+    expect(profile.skills).toHaveLength(50);
+    expect(profile.warnings).toContain(
+      "skills reached the 50-item safety limit and may be truncated.",
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(10);
+    expect(limiter.acquire).toHaveBeenCalledTimes(10);
+  });
+
+  it("hard-caps a section when upstream pages contain more than the requested page size", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") return htmlResponse(profileHtml);
+      const pagerId = url.searchParams.get("sduiid") ?? "";
+      if (!pagerId.endsWith(".skills")) return rscResponse(emptyFlight);
+      const start = Number(JSON.parse(String(init?.body)).clientArguments.payload.start);
+      return rscResponse(skillsPageFlight(`oversized-${start}`, 12));
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    const profile = await provider.fetch("https://www.linkedin.com/in/vishnu-example/");
+    expect(profile.skills).toHaveLength(50);
+    expect(profile.warnings).toContain(
+      "skills reached the 50-item safety limit and may be truncated.",
+    );
+  });
+
+  it.each([
+    [9, 9, false],
+    [10, 10, false],
+    [11, 11, false],
+    [20, 20, false],
+    [49, 49, false],
+    [50, 50, true],
+    [51, 50, true],
+  ])("handles a %i-item section boundary without silent overclaiming", async (
+    total,
+    expected,
+    truncated,
+  ) => {
+    const requestedStarts: number[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") return htmlResponse(profileHtml);
+      const pagerId = url.searchParams.get("sduiid") ?? "";
+      if (!pagerId.endsWith(".skills")) return rscResponse(emptyFlight);
+      const start = Number(JSON.parse(String(init?.body)).clientArguments.payload.start);
+      requestedStarts.push(start);
+      const count = Math.min(10, Math.max(0, total - start));
+      return count > 0
+        ? rscResponse(skillsPageFlight(`boundary-${start}`, count))
+        : rscResponse(emptyFlight);
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    const result = await provider.fetch("https://www.linkedin.com/in/vishnu-example/");
+    expect(result.skills).toHaveLength(expected);
+    expect(result.warnings.includes(
+      "skills reached the 50-item safety limit and may be truncated.",
+    )).toBe(truncated);
+    expect(requestedStarts).toEqual(
+      Array.from({ length: Math.min(5, Math.floor(total / 10) + 1) }, (_, index) => index * 10),
+    );
+  });
+
+  it("deduplicates an item spanning page boundaries without dropping later items", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") return htmlResponse(profileHtml);
+      const pagerId = url.searchParams.get("sduiid") ?? "";
+      if (!pagerId.endsWith(".skills")) return rscResponse(emptyFlight);
+      const start = Number(JSON.parse(String(init?.body)).clientArguments.payload.start);
+      if (start === 0) return rscResponse(skillsPageFlight("first"));
+      if (start === 10) {
+        return rscResponse(skillsPageFlight("second", 3).replace("second-1", "first-1"));
+      }
+      return rscResponse(emptyFlight);
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    const result = await provider.fetch("https://www.linkedin.com/in/vishnu-example/");
+    expect(result.skills).toHaveLength(12);
+    expect(result.skills.at(-1)).toBe("second-3");
+  });
+
+  it("accepts an explicit empty-section marker", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      return url.pathname === "/in/vishnu-example/"
+        ? htmlResponse(profileHtml, { status: 200 })
+        : rscResponse(emptyFlight, { status: 200 });
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    const profile = await provider.fetch("https://www.linkedin.com/in/vishnu-example/");
+    expect(profile.name).toBe("Vishnu Example");
+    expect(profile.experience).toEqual([]);
+    expect(profile.education).toEqual([]);
+    expect(profile.warnings).toEqual([
+      "No experience entries were returned by LinkedIn.",
+      "No education entries were returned by LinkedIn.",
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
   });
 
   it("rejects a successful profile page without LinkedIn's transient profile id", async () => {

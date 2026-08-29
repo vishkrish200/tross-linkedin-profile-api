@@ -73,4 +73,51 @@ describe("ConcurrencyProvider", () => {
     expect(() => new ConcurrencyProvider(inner, 0)).toThrow(RangeError);
     expect(() => new ConcurrencyProvider(inner, 1.5)).toThrow(RangeError);
   });
+
+  it("removes an aborted waiter without consuming a slot", async () => {
+    let finish!: () => void;
+    const url = "https://www.linkedin.com/in/example/";
+    const inner = {
+      fetch: vi.fn(() => new Promise<Profile>((resolve) => {
+        finish = () => resolve(profile(url));
+      })),
+    };
+    const limited = new ConcurrencyProvider(inner, 1);
+    const first = limited.fetch(url);
+    const controller = new AbortController();
+    const waiting = limited.fetch("https://www.linkedin.com/in/waiting/", {
+      signal: controller.signal,
+    });
+    controller.abort(new Error("cancelled"));
+    await expect(waiting).rejects.toThrow("cancelled");
+    finish();
+    await first;
+    expect(inner.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts distinct queued profiles in FIFO order", async () => {
+    const started: string[] = [];
+    const completions: Array<() => void> = [];
+    const inner = {
+      fetch: vi.fn((url: string) => new Promise<Profile>((resolve) => {
+        started.push(url);
+        completions.push(() => resolve(profile(url)));
+      })),
+    };
+    const limited = new ConcurrencyProvider(inner, 1);
+    const urls = ["first", "second", "third"].map((slug) =>
+      `https://www.linkedin.com/in/${slug}/`);
+    const requests = urls.map((url) => limited.fetch(url));
+
+    await setImmediate();
+    expect(started).toEqual(urls.slice(0, 1));
+    completions.shift()?.();
+    await setImmediate();
+    expect(started).toEqual(urls.slice(0, 2));
+    completions.shift()?.();
+    await setImmediate();
+    expect(started).toEqual(urls);
+    completions.shift()?.();
+    await Promise.all(requests);
+  });
 });
