@@ -4,11 +4,16 @@
 
 ```text
 HTTP request
-  -> bearer-token check
+  -> bearer-token check and separate unauthorized quota
+  -> authenticated profile quota
   -> LinkedIn URL validation and canonicalization
   -> short-lived cache and same-profile request coalescing
+  -> one overall extraction deadline
   -> upstream concurrency limit
+  -> authentication/challenge circuit breaker
+  -> shared upstream request pacing
   -> direct LinkedIn profile-page request
+  -> direct RSC lazy profile-card component request
   -> direct RSC section-pagination requests
   -> React Flight extraction
   -> Zod response validation
@@ -27,19 +32,26 @@ HTTP request
 
 ### Provider layer
 
-`src/provider/linkedin-api-provider.ts` fetches the validated profile page and then calls LinkedIn's private RSC pagination endpoint for each supported section. Endpoints are constructed only from the validated public identifier and the transient profile identifier returned in LinkedIn's own server-rendered response. Session values come only from runtime configuration.
+`src/provider/linkedin-api-provider.ts` fetches the validated profile page, follows LinkedIn's advertised lazy profile-card component contract for About-capable cards, and then calls the private RSC pagination endpoint for each supported section. Endpoints are constructed only from the validated public identifier, component identifiers in LinkedIn's response, and the transient profile identifier returned in the same response. Session values come only from runtime configuration.
 
-`src/provider/extract-profile.ts` is a pure parser. It reads the `rehydrate-data` React Flight stream, resolves row references, collects semantic text from rendered component children, and maps section entries into the stable domain schema. Sanitized synthetic Flight fixtures cover this boundary without contacting LinkedIn.
+`src/provider/extract-profile.ts` is a pure parser. It reads the `rehydrate-data` React Flight stream, resolves row references and lazy component request metadata, collects semantic text from rendered component content, and maps section entries into the stable domain schema. Sanitized synthetic Flight fixtures cover this boundary without contacting LinkedIn.
 
 ### Operational controls
 
 - Successful results are cached briefly, and simultaneous misses for the same profile share one upstream request.
+- The cache is bounded with LRU eviction, opportunistic expiry cleanup, and a zero-cache mode.
 - Distinct uncached profile extractions are limited to two at a time by default.
-- API callers can be protected with a bearer token and are rate-limited.
+- Production startup requires a bearer token. A current and previous token can overlap during a bounded rotation window; comparison uses fixed-size digests and constant-time equality.
+- Unauthorized requests have an IP-scoped quota separate from the authenticated profile quota, and health checks do not consume either profile quota.
+- Profile requests have a small body limit and return `Cache-Control: no-store`.
 - Session cookies and CSRF values exist only in runtime configuration.
-- Redirects to login/checkpoint pages and authentication failures are surfaced explicitly.
-- LinkedIn rate limits and challenge status codes are not retried or bypassed.
-- Section pagination is capped at five pages per section and successful aggregate results are cached.
+- Authorization headers, cookies, request bodies, and response bodies are redacted from structured logs.
+- Every extraction has one overall deadline, including queue time. Individual fetches also have a timeout, response-size bound, MIME check, UTF-8 validation, and truncated-body check.
+- A process-wide breaker opens on 401/403, login redirects, checkpoints, consent walls, CAPTCHAs, and 429/999 responses. It aborts peer work, blocks queued network calls, and closes only after its cooldown.
+- Direct LinkedIn requests pass through one process-wide rolling-window limiter with minimum spacing. They are never automatically retried.
+- Every zero-item pagination response requires the known empty marker. Declared-item/parser-count discrepancies, repeated pages, and changed later-page shapes fail closed.
+- Section pagination is capped at five requests and every public section array is hard-capped at 50 entries. A full fifth page or upstream page-size over-delivery returns a warning that the result may be truncated.
+- Client disconnect and service shutdown signals propagate cancellation through cache coalescing, queue waits, and active fetches.
 
 ## Deliberate omissions
 
@@ -48,6 +60,7 @@ HTTP request
 - No CAPTCHA or checkpoint solving.
 - No automatic retry loop against LinkedIn.
 - No database or long-term profile retention.
+- No raw profile bodies in the smoke-test output or application logs.
 - No deployment-specific SDK in the application core.
 
 The private provider is intentionally isolated because its endpoint and schema are unstable and compliance-sensitive.

@@ -26,9 +26,15 @@ Tross emailed candidates to clarify that the LinkedIn solution must be purely re
 - [x] Deterministic tests
 - [x] Docker packaging
 - [x] Setup, API, approach, and limitation documentation
+- [x] Reviewer discovery route and human-readable API documentation
+- [x] OpenAPI 3.1 contract generated from the canonical Zod schemas
+- [x] Privacy-minimized public acceptance evidence
 - [x] Authorized live-profile smoke test
 - [x] Select hosting provider and deploy over HTTPS
 - [x] Verify the deployed endpoint from outside the host
 - [x] Create and review the public GitHub repository
 - [x] Run repository and Git-history secret scans
+- [x] Automate Git-history secret scanning in CI
+- [ ] Record and host the optional demo video
+- [ ] Create and privately deliver a dedicated reviewer token
 - [ ] Complete the Tross submission form
