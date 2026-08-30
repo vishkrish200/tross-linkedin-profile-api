@@ -16,13 +16,13 @@ A browser-free TypeScript API that reverse-engineers LinkedIn's server-rendered 
 | Health check | [`GET /health`](https://tross-linkedin-profile-api-583248531894.asia-south1.run.app/health) |
 | Privacy-minimized acceptance evidence | [`docs/acceptance.md`](docs/acceptance.md) |
 
-During the bounded challenge-review window, the profile route runs in an explicit controlled public-demo mode: no caller token is required, but per-client, global, cold-extraction, concurrency, pacing, expiry, and circuit-breaker limits bound its use. Bearer protection remains the default for normal deployments.
+During the bounded challenge-review window, the profile route runs in an explicit controlled public-demo mode: no caller token is required. Reviewer traffic has generous minute-level quotas, while cache/coalescing, a bounded distinct-profile queue, a cold-extraction budget, LinkedIn concurrency and pacing, expiry, and a circuit breaker independently protect the upstream session. Bearer protection remains the default for normal deployments.
 
 ## Status
 
 The HTTP API, strict URL validation, direct LinkedIn HTTP client, React Flight extraction, lazy-card loading, section pagination, cache, request pacing, circuit protection, Docker packaging, and deterministic adversarial tests are implemented. The deployed application does not launch or depend on a browser.
 
-The August 29 acceptance audit passed its 13-profile matrix. Cloud Run revision `tross-linkedin-profile-api-00009-p5w` returned all 11 visible About sections with exact normalized length/hash matches, preserved paginated skills and certifications, recovered missing experience details, returned visible credential links, and selected the exact framed owner image in the custom-photo case. On August 30, source commit `ca690b2` was deployed as `tross-linkedin-profile-api-00011-4bx`; 145 deterministic tests, public discovery, mode-aware docs and OpenAPI, both one-instance ceilings, and a tokenless privacy-minimized production canary passed. The aggregate evidence and residual limits are recorded in [`docs/acceptance.md`](docs/acceptance.md). LinkedIn's private endpoints and response shapes can still change without notice, so dated live compatibility is not a permanent or universal guarantee.
+The August 29 acceptance audit passed its 13-profile matrix. Cloud Run revision `tross-linkedin-profile-api-00009-p5w` returned all 11 visible About sections with exact normalized length/hash matches, preserved paginated skills and certifications, recovered missing experience details, returned visible credential links, and selected the exact framed owner image in the custom-photo case. On August 30, source commit `c37db07` was deployed as `tross-linkedin-profile-api-c37db07`; 149 deterministic tests, enforced coverage thresholds, source and OpenAPI lint, dependency and secret audits, a high/critical container scan, public discovery, both one-instance ceilings, normalized error responses, and a tokenless privacy-minimized production canary passed. The aggregate evidence and residual limits are recorded in [`docs/acceptance.md`](docs/acceptance.md). LinkedIn's private endpoints and response shapes can still change without notice, so dated live compatibility is not a permanent or universal guarantee.
 
 Live HTTPS endpoint: [`https://tross-linkedin-profile-api-583248531894.asia-south1.run.app`](https://tross-linkedin-profile-api-583248531894.asia-south1.run.app). Discovery, documentation, OpenAPI, health, and the controlled profile demo are public during the documented evaluation window; the discovery response reports the active access mode and limits.
 
@@ -117,6 +117,7 @@ Set these runtime values in `.env` using a session you are authorized to use:
 - `PUBLIC_DEMO_EXPIRES_AT`: required ISO timestamp in `public-demo` mode. The route returns `410 public_demo_closed` at and after this instant.
 - `PUBLIC_DEMO_PER_CLIENT_RATE_LIMIT_MAX`, `PUBLIC_DEMO_GLOBAL_RATE_LIMIT_MAX`, `PUBLIC_DEMO_RATE_LIMIT_WINDOW`, and `PUBLIC_DEMO_MAX_COLD_EXTRACTIONS`: anonymous fairness and blast-radius controls.
 - `LINKEDIN_MAX_CONCURRENCY`: maximum distinct LinkedIn profile extractions in flight; defaults to `2`.
+- `LINKEDIN_MAX_QUEUE_SIZE`: maximum distinct uncached profiles allowed to wait behind active extraction; defaults to `4`. Simultaneous requests for the same profile coalesce before this queue.
 
 The defensive controls in `.env.example` also bound request and response sizes, the completed-result cache, per-request and overall deadlines, bearer and public-demo quotas, upstream request pacing, and the protection-signal circuit-breaker cooldown. Invalid configured numeric values fail startup instead of silently falling back. `ALLOW_UNAUTHENTICATED_LOCAL=true` is accepted only outside production and must be set explicitly; it is not a production public-access switch.
 
@@ -175,6 +176,7 @@ The reference deployment runs on Google Cloud Run with the LinkedIn session and 
 - `413 payload_too_large`: the body exceeds the configured request limit.
 - `415 unsupported_media_type`: the request does not use a JSON content type.
 - `429 rate_limit_exceeded`: a caller or global public-demo quota was exceeded.
+- `429 provider_busy`: the bounded distinct-profile queue is full; respect `Retry-After` and retry shortly.
 - `429 public_demo_budget_exhausted`: the running instance consumed its uncached-extraction budget.
 - `500 internal_error`: an unexpected internal failure occurred without exposing internals.
 - `502 provider_authentication_failed`: LinkedIn rejected or redirected the runtime session.
@@ -190,7 +192,7 @@ The reference deployment runs on Google Cloud Run with the LinkedIn session and 
 - The process stops new LinkedIn traffic for the configured cooldown after authentication, checkpoint, consent, CAPTCHA, 429, or 999 signals; it does not retry or bypass them.
 - Empty, private, or account-invisible fields are returned as empty arrays or omitted optional fields.
 - An unrecognized zero-item response on any pagination page, a repeated page, an invalid MIME/body, or other recognized response drift fails as `provider_fetch_failed` instead of being silently classified as complete.
-- The cache, public-demo quotas, cold-extraction budget, request pacing, and circuit state are per process. The challenge deployment therefore requires an enforced one-instance ceiling; a durable shared store would be required for a hard multi-instance quota.
+- The cache, bounded queue, public-demo quotas, cold-extraction budget, request pacing, and circuit state are per process. The challenge deployment therefore requires an enforced one-instance ceiling; a durable shared store would be required for hard multi-instance coordination.
 - A section returns at most 50 entries because upstream pagination and the public schema are intentionally bounded. A full fifth page or upstream page-size over-delivery adds a `possibly truncated` warning.
 - Synthetic React Flight fixtures prove deterministic parsing; the dated live smoke test is the separate compatibility check.
 

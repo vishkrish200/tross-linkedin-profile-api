@@ -21,7 +21,7 @@ Tross emailed candidates to clarify that the LinkedIn solution must be purely re
 - [x] Profile provider boundary
 - [x] Direct profile-page and RSC pagination provider
 - [x] React Flight response extractor
-- [x] Cache and rate limiting
+- [x] Cache, same-profile burst coalescing, bounded distinct-profile queue, and layered rate limiting
 - [x] Runtime-only cookie and CSRF-secret handling
 - [x] Explicit expiring public-demo mode with caller, global, cold-extraction, concurrency, pacing, and circuit-breaker bounds
 - [x] Deterministic tests
@@ -36,6 +36,7 @@ Tross emailed candidates to clarify that the LinkedIn solution must be purely re
 - [x] Create and review the public GitHub repository
 - [x] Run repository and Git-history secret scans
 - [x] Automate Git-history secret scanning in CI
+- [x] Enforce source/OpenAPI lint, coverage thresholds, and high/critical container scanning in CI
 - [ ] Record and host the optional demo video
 - [x] Deploy and live-verify the expiring controlled public-demo mode
 - [ ] Complete the Tross submission form

@@ -6,15 +6,17 @@ This service depends on undocumented LinkedIn HTTP and React Flight contracts. I
 
 - Strict HTTPS `linkedin.com/in/<slug>` canonicalization rejects credentials, ports, malformed encoding, encoded separators, controls, and non-identifier characters before provider access.
 - Bearer mode is the production default and refuses to start without an API key. A previous key can overlap briefly for rotation, and unauthorized traffic has a separate peer-address quota so it cannot consume the valid-caller quota.
-- Controlled public access requires the explicit `public-demo` mode and a parseable expiry timestamp. It has separate hashed per-client and global quotas, closes automatically at expiry, and spends a bounded cold-extraction credit only after a cache miss. The client bucket is a fairness control; the global bucket, extraction budget, one-instance ceiling, provider concurrency, pacing, and circuit breaker bound account exposure.
+- Controlled public access requires the explicit `public-demo` mode and a parseable expiry timestamp. It has separate hashed per-client and global ingress quotas, closes automatically at expiry, and spends a bounded cold-extraction credit only after a cache miss is admitted for execution. The client bucket is a fairness control; the global bucket, bounded distinct-profile queue, extraction budget, one-instance ceiling, provider concurrency, pacing, and circuit breaker bound account exposure.
 - Profile requests use a small body limit and `no-store`; logs redact caller authorization, cookies, request bodies, and extracted response bodies.
+- Framework parser failures are normalized to the public `{ error, message }` envelope; malformed JSON, oversized bodies, unsupported media, and unexpected errors have explicit OpenAPI responses.
 - Completed cache entries have TTL and LRU bounds. Same-profile misses coalesce, but one disconnected consumer does not cancel work still needed by another; all-consumer cancellation does.
-- One extraction-wide deadline includes queue time. Distinct profiles have a FIFO concurrency bound, and LinkedIn requests share rolling-window pacing plus minimum spacing.
+- One extraction-wide deadline includes queue time. Distinct profiles have a bounded FIFO concurrency queue whose overflow returns retryable `429 provider_busy`, and LinkedIn requests share rolling-window pacing plus minimum spacing.
 - Authentication, checkpoint, consent, CAPTCHA, 429, and 999 signals open one process-wide circuit. It cancels peer work and prevents queued requests from reaching LinkedIn until cooldown.
 - Successful upstream responses have MIME, byte-size, UTF-8, and uncompressed truncation checks. Login/challenge HTML returned with HTTP 200 is classified explicitly.
 - Pagination validates every page, rejects declared-item/parser-count discrepancies, unknown empty shapes, and repeated pages. The hand-owned schema and extractor both enforce the intentional 50-item cap, including when an upstream page contains more records than requested, and return a completeness warning.
 - The parser bounds reference/object traversal, rejects unsafe credential and image URLs, preserves richer duplicate records, and validates the final public object with hand-owned Zod schemas.
 - `SIGINT`/`SIGTERM` initiate Fastify shutdown and abort active extraction controllers. The smoke command emits privacy-minimized structural evidence only.
+- CI enforces zero-warning source lint, recommended OpenAPI lint for both access modes, coverage thresholds, dependency and full-history secret auditing, a production image build, and a pinned high/critical Trivy scan. The runtime layer removes unused package-manager tooling and runs as the unprivileged `node` user.
 
 ## Deterministic adversarial catalog
 
@@ -22,9 +24,9 @@ The local suite covers:
 
 - Malformed URLs, percent escapes, encoded slash/backslash/double encoding, credentials, ports, Unicode slugs, oversized bodies, absent/invalid/current/previous API keys, explicit public-demo configuration and expiry, per-client/global quota separation, cold-extraction budgeting, and health-route isolation.
 - Missing/expired session configuration; 401/403; login/checkpoint redirects; HTTP 429/999; HTTP-200 auth, challenge, and consent pages; timeout; deletion; wrong or missing MIME; oversized, truncated, and malformed UTF-8 bodies.
-- Overall deadline expiry while active and queued, FIFO fairness, limiter cancellation both during a timed wait and behind another waiter, slot release after failure, and graceful shutdown cancellation.
+- Overall deadline expiry while active and queued, FIFO fairness, queue-overflow rejection, limiter cancellation both during a timed wait and behind another waiter, slot release after failure, and graceful shutdown cancellation.
 - Circuit opening, queued-call suppression, peer cancellation, authentication-triggered opening, and cooldown recovery.
-- Cache coalescing success/failure, TTL expiry, zero-cache mode, LRU behavior, a thousand unique slugs, one-consumer cancellation, and all-consumer cancellation.
+- Cache coalescing across a 100-request same-profile burst, coalescing failure, TTL expiry, zero-cache mode, LRU behavior, a thousand unique slugs, one-consumer cancellation, and all-consumer cancellation.
 - Pagination totals of 9, 10, 11, 20, 49, 50, and 51; an upstream page larger than the requested size; declared-ten/parsed-eight disagreement; malformed later pages; exact repeats; cross-page duplicates; monotonic requested offsets; and the 50-item warning.
 - Short, whitespace-only, multi-paragraph, emoji, RTL, CJK, combining-character, zero-width, and label-like About values; empty `children` with populated `initialContent`; and the current explicit-empty advertised-card structure.
 - Grouped and overlapping roles, undated work, career breaks, missing optional fields, delimiter-bearing company names, non-bulleted descriptions, multiple degrees at one school, renewed certificates, language proficiency, unsafe redirects, absent/custom/partial images, and unrelated or malformed image candidates.

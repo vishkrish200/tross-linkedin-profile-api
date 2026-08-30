@@ -43,6 +43,18 @@ The live matrix found and drove regression fixes for:
 
 All committed regression fixtures are synthetic and sanitized.
 
+## Final submission release
+
+On August 30, source commit `c37db07` was deployed as Cloud Run revision `tross-linkedin-profile-api-c37db07` at 100% traffic. The final release added explicit public-demo access, uniform HTTP error envelopes, stronger bearer-key validation, and enforced release gates.
+
+- All 149 deterministic tests, TypeScript checks, zero-warning source lint, and both bearer/public-demo OpenAPI recommended lint passed.
+- Global test coverage was 94.22% statements, 85.64% branches, 96.95% functions, and 96.26% lines; CI enforces minimums of 90%, 80%, 90%, and 90% respectively.
+- `npm audit` reported zero vulnerabilities, the 22-commit Gitleaks history scan reported no leaks, and Trivy reported zero fixed high/critical findings in the final image.
+- The production image ran as the unprivileged `node` user and excluded unused `npm`/`npx` tooling from the runtime layer.
+- Live discovery, health, docs, and OpenAPI returned HTTP 200. Malformed JSON, unsupported media, and oversized bodies returned the documented `400`, `415`, and `413` envelopes.
+- One tokenless, privacy-minimized production canary returned HTTP 200 with core identity fields, About, experience, education, skills, and profile images present, with no parser warning or protection signal.
+- Cloud Run reported ready status, 100% traffic on the final revision, service- and revision-level maximum instance counts of one, concurrency 10, timeout 30 seconds, and the documented automatic public-demo expiry.
+
 ## Deterministic failure contract
 
 The test suite covers these expected outcomes:
