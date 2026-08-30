@@ -4,10 +4,11 @@
 
 ```text
 HTTP request
-  -> bearer-token check and separate unauthorized quota
-  -> authenticated profile quota
+  -> explicit access mode: bearer check or expiring public demo
+  -> bearer quota or public per-client plus global quotas
   -> LinkedIn URL validation and canonicalization
   -> short-lived cache and same-profile request coalescing
+  -> public-demo cold-extraction budget on cache misses
   -> one overall extraction deadline
   -> upstream concurrency limit
   -> authentication/challenge circuit breaker
@@ -24,7 +25,7 @@ HTTP request
 
 ### HTTP layer
 
-`src/app.ts` owns routing, caller authentication, rate limiting, status codes, and the public error contract. It depends only on `ProfileProvider`.
+`src/app.ts` owns routing, explicit bearer/public-demo access mode, expiry enforcement, caller/global rate limiting, status codes, and the public error contract. It depends only on `ProfileProvider`.
 
 ### Domain layer
 
@@ -41,8 +42,9 @@ HTTP request
 - Successful results are cached briefly, and simultaneous misses for the same profile share one upstream request.
 - The cache is bounded with LRU eviction, opportunistic expiry cleanup, and a zero-cache mode.
 - Distinct uncached profile extractions are limited to two at a time by default.
-- Production startup requires a bearer token. A current and previous token can overlap during a bounded rotation window; comparison uses fixed-size digests and constant-time equality.
-- Unauthorized requests have an IP-scoped quota separate from the authenticated profile quota, and health checks do not consume either profile quota.
+- Bearer mode is the production default. A current and previous token can overlap during a bounded rotation window; comparison uses fixed-size digests and constant-time equality.
+- `public-demo` must be selected explicitly and requires an expiry timestamp. It applies a hashed per-client fairness bucket, one global bucket, and a cold-extraction budget inside the cache so warm hits do not spend LinkedIn-account budget. The global bucket is the security boundary because caller network headers are not identity.
+- Unauthorized bearer requests have a separate quota, and health checks do not consume profile quotas.
 - Profile requests have a small body limit and return `Cache-Control: no-store`.
 - Session cookies and CSRF values exist only in runtime configuration.
 - Authorization headers, cookies, request bodies, and response bodies are redacted from structured logs.

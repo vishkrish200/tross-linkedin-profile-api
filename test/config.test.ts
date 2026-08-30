@@ -4,7 +4,9 @@ import { loadConfig } from "../src/config.js";
 describe("runtime configuration", () => {
   it("requires an API key unless local unauthenticated mode is explicit", () => {
     expect(() => loadConfig({})).toThrow(/API_KEY is required/);
-    expect(loadConfig({ ALLOW_UNAUTHENTICATED_LOCAL: "true" }).apiKey).toBeUndefined();
+    const local = loadConfig({ ALLOW_UNAUTHENTICATED_LOCAL: "true" });
+    expect(local.apiKey).toBeUndefined();
+    expect(local.accessMode).toBe("bearer");
   });
 
   it("never permits unauthenticated production mode", () => {
@@ -12,6 +14,34 @@ describe("runtime configuration", () => {
       NODE_ENV: "production",
       ALLOW_UNAUTHENTICATED_LOCAL: "true",
     })).toThrow(/API_KEY is required/);
+  });
+
+  it("permits only an explicit, expiring production public-demo mode", () => {
+    const publicDemo = loadConfig({
+      NODE_ENV: "production",
+      ACCESS_MODE: "public-demo",
+      PUBLIC_DEMO_EXPIRES_AT: "2026-09-08T18:29:59Z",
+    });
+    expect(publicDemo.apiKey).toBeUndefined();
+    expect(publicDemo.accessMode).toBe("public-demo");
+    expect(publicDemo.publicDemoExpiresAt).toBe(Date.parse("2026-09-08T18:29:59Z"));
+    expect(publicDemo.publicDemoPerClientRateLimitMax).toBe(6);
+    expect(publicDemo.publicDemoGlobalRateLimitMax).toBe(20);
+    expect(publicDemo.publicDemoMaxColdExtractions).toBe(50);
+
+    expect(() => loadConfig({
+      NODE_ENV: "production",
+      ACCESS_MODE: "public-demo",
+    })).toThrow(/PUBLIC_DEMO_EXPIRES_AT/);
+    expect(() => loadConfig({
+      NODE_ENV: "production",
+      ACCESS_MODE: "public-demo",
+      PUBLIC_DEMO_EXPIRES_AT: "not-a-date",
+    })).toThrow(/PUBLIC_DEMO_EXPIRES_AT/);
+    expect(() => loadConfig({
+      API_KEY: "test-key",
+      ACCESS_MODE: "something-else",
+    })).toThrow(/ACCESS_MODE/);
   });
 
   it("accepts bounded cache disablement and explicit hardening controls", () => {

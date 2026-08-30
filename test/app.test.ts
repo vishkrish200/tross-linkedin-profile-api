@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
-import type { ProfileProvider } from "../src/provider/profile-provider.js";
+import {
+  ProviderQuotaExceededError,
+  type ProfileProvider,
+} from "../src/provider/profile-provider.js";
 
 const provider: ProfileProvider = {
   async fetch(sourceUrl) {
@@ -21,7 +24,12 @@ const provider: ProfileProvider = {
 
 describe("profile API", () => {
   it("provides a reviewer-friendly discovery surface", async () => {
-    const app = await buildApp({ provider, revision: "test-revision" });
+    const app = await buildApp({
+      provider,
+      accessMode: "bearer",
+      apiKey: "secret",
+      revision: "test-revision",
+    });
 
     const discovery = await app.inject({ method: "GET", url: "/" });
     expect(discovery.statusCode).toBe(200);
@@ -53,6 +61,126 @@ describe("profile API", () => {
       },
     });
     expect(openApi.components.schemas.Profile.properties.skills.maxItems).toBe(50);
+    await app.close();
+  });
+
+  it("documents controlled public access without inventing reviewer credentials", async () => {
+    const expiresAt = Date.parse("2026-09-08T18:29:59.000Z");
+    const app = await buildApp({
+      provider,
+      accessMode: "public-demo",
+      publicDemoExpiresAt: expiresAt,
+      publicDemoPerClientRateLimitMax: 6,
+      publicDemoGlobalRateLimitMax: 20,
+      publicDemoRateLimitWindow: "1 hour",
+      publicDemoMaxColdExtractions: 50,
+      now: () => expiresAt - 1,
+    });
+
+    const discovery = (await app.inject({ method: "GET", url: "/" })).json();
+    expect(discovery.access).toEqual({
+      mode: "public-demo",
+      expiresAt: "2026-09-08T18:29:59.000Z",
+      perClientMax: 6,
+      globalMax: 20,
+      timeWindow: "1 hour",
+      maxColdExtractions: 50,
+    });
+
+    const documentation = await app.inject({ method: "GET", url: "/docs" });
+    expect(documentation.body).toContain("Controlled public demo");
+    expect(documentation.body).not.toContain("authorization: Bearer");
+
+    const openApi = (await app.inject({ method: "GET", url: "/openapi.json" })).json();
+    expect(openApi.paths["/v1/profiles"].post.security).toBeUndefined();
+    expect(openApi.paths["/v1/profiles"].post.responses["410"]).toBeDefined();
+    expect(openApi.components.securitySchemes).toBeUndefined();
+    await app.close();
+  });
+
+  it("closes public access automatically at the configured instant", async () => {
+    const fetch = vi.fn(provider.fetch);
+    const expiresAt = Date.parse("2026-09-08T18:29:59.000Z");
+    const app = await buildApp({
+      provider: { fetch },
+      accessMode: "public-demo",
+      publicDemoExpiresAt: expiresAt,
+      now: () => expiresAt,
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/profiles",
+      payload: { url: "https://www.linkedin.com/in/test-person/" },
+    });
+    expect(response.statusCode).toBe(410);
+    expect(response.json().error).toBe("public_demo_closed");
+    expect(fetch).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("applies a per-client fairness quota in public-demo mode", async () => {
+    const app = await buildApp({
+      provider,
+      accessMode: "public-demo",
+      publicDemoPerClientRateLimitMax: 2,
+      publicDemoGlobalRateLimitMax: 10,
+    });
+    const request = (clientIp: string) => app.inject({
+      method: "POST" as const,
+      url: "/v1/profiles",
+      headers: {
+        "user-agent": "reviewer-test",
+        "x-forwarded-for": `${clientIp}, 35.191.0.1`,
+      },
+      payload: { url: "https://www.linkedin.com/in/test-person/" },
+    });
+
+    expect((await request("203.0.113.1")).statusCode).toBe(200);
+    expect((await request("203.0.113.1")).statusCode).toBe(200);
+    expect((await request("203.0.113.1")).statusCode).toBe(429);
+    expect((await request("203.0.113.2")).statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("keeps a global public-demo quota independent of caller identity", async () => {
+    const app = await buildApp({
+      provider,
+      accessMode: "public-demo",
+      publicDemoPerClientRateLimitMax: 10,
+      publicDemoGlobalRateLimitMax: 2,
+    });
+    const request = (clientIp: string) => app.inject({
+      method: "POST" as const,
+      url: "/v1/profiles",
+      headers: {
+        "user-agent": `reviewer-${clientIp}`,
+        "x-forwarded-for": `${clientIp}, 35.191.0.1`,
+      },
+      payload: { url: "https://www.linkedin.com/in/test-person/" },
+    });
+
+    expect((await request("203.0.113.1")).statusCode).toBe(200);
+    expect((await request("203.0.113.2")).statusCode).toBe(200);
+    expect((await request("203.0.113.3")).statusCode).toBe(429);
+    await app.close();
+  });
+
+  it("maps an exhausted cold-extraction budget to a bounded public error", async () => {
+    const app = await buildApp({
+      accessMode: "public-demo",
+      provider: {
+        async fetch() {
+          throw new ProviderQuotaExceededError();
+        },
+      },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/profiles",
+      payload: { url: "https://www.linkedin.com/in/test-person/" },
+    });
+    expect(response.statusCode).toBe(429);
+    expect(response.json().error).toBe("public_demo_budget_exhausted");
     await app.close();
   });
 

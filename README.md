@@ -16,7 +16,7 @@ A browser-free TypeScript API that reverse-engineers LinkedIn's server-rendered 
 | Health check | [`GET /health`](https://tross-linkedin-profile-api-583248531894.asia-south1.run.app/health) |
 | Privacy-minimized acceptance evidence | [`docs/acceptance.md`](docs/acceptance.md) |
 
-The profile route is intentionally bearer-protected. A dedicated reviewer token is supplied separately from this public repository.
+During the bounded challenge-review window, the profile route runs in an explicit controlled public-demo mode: no caller token is required, but per-client, global, cold-extraction, concurrency, pacing, expiry, and circuit-breaker limits bound its use. Bearer protection remains the default for normal deployments.
 
 ## Status
 
@@ -24,7 +24,7 @@ The HTTP API, strict URL validation, direct LinkedIn HTTP client, React Flight e
 
 The August 29 acceptance audit passed its 13-profile matrix. Cloud Run revision `tross-linkedin-profile-api-00009-p5w` returned all 11 visible About sections with exact normalized length/hash matches, preserved paginated skills and certifications, recovered missing experience details, returned visible credential links, and selected the exact framed owner image in the custom-photo case. On August 30, source commit `fc8c505` was deployed as `tross-linkedin-profile-api-fc8c505`; its public discovery, docs, OpenAPI, health, authentication boundary, and a bounded three-case compatibility canary all passed. The aggregate evidence and residual limits are recorded in [`docs/acceptance.md`](docs/acceptance.md). LinkedIn's private endpoints and response shapes can still change without notice, so dated live compatibility is not a permanent or universal guarantee.
 
-Live HTTPS endpoint: [`https://tross-linkedin-profile-api-583248531894.asia-south1.run.app`](https://tross-linkedin-profile-api-583248531894.asia-south1.run.app). The profile route requires the bearer token supplied separately to the challenge reviewers; discovery, documentation, OpenAPI, and health routes are public.
+Live HTTPS endpoint: [`https://tross-linkedin-profile-api-583248531894.asia-south1.run.app`](https://tross-linkedin-profile-api-583248531894.asia-south1.run.app). Discovery, documentation, OpenAPI, health, and the controlled profile demo are public during the documented evaluation window; the discovery response reports the active access mode and limits.
 
 ## Platform and data warning
 
@@ -51,7 +51,6 @@ Returns `{"status":"ok"}`.
 ```http
 POST /v1/profiles HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer <API_KEY>
 
 {"url":"https://www.linkedin.com/in/example-person/"}
 ```
@@ -112,11 +111,14 @@ Set these runtime values in `.env` using a session you are authorized to use:
 
 - `LINKEDIN_COOKIE`: the minimum cookie header required by the authenticated LinkedIn requests, normally containing `li_at` and `JSESSIONID`.
 - `LINKEDIN_CSRF_TOKEN`: the CSRF value observed on the authorized request. It may be omitted when `JSESSIONID` is present because the provider derives its unquoted value.
-- `API_KEY`: a required long random bearer token for callers of this API.
+- `ACCESS_MODE`: `bearer` by default; use `public-demo` only for a deliberately bounded evaluation deployment.
+- `API_KEY`: a required long random bearer token in the default mode. It may remain configured as a rollback credential while `public-demo` is active.
 - `API_KEY_PREVIOUS`: optional prior token for a short, deliberate rotation overlap; remove it after callers migrate.
+- `PUBLIC_DEMO_EXPIRES_AT`: required ISO timestamp in `public-demo` mode. The route returns `410 public_demo_closed` at and after this instant.
+- `PUBLIC_DEMO_PER_CLIENT_RATE_LIMIT_MAX`, `PUBLIC_DEMO_GLOBAL_RATE_LIMIT_MAX`, `PUBLIC_DEMO_RATE_LIMIT_WINDOW`, and `PUBLIC_DEMO_MAX_COLD_EXTRACTIONS`: anonymous fairness and blast-radius controls.
 - `LINKEDIN_MAX_CONCURRENCY`: maximum distinct LinkedIn profile extractions in flight; defaults to `2`.
 
-The defensive controls in `.env.example` also bound request and response sizes, the completed-result cache, per-request and overall deadlines, unauthorized and authenticated quotas, upstream request pacing, and the protection-signal circuit-breaker cooldown. Invalid configured numeric values fail startup instead of silently falling back. `ALLOW_UNAUTHENTICATED_LOCAL=true` is accepted only outside production and must be set explicitly.
+The defensive controls in `.env.example` also bound request and response sizes, the completed-result cache, per-request and overall deadlines, bearer and public-demo quotas, upstream request pacing, and the protection-signal circuit-breaker cooldown. Invalid configured numeric values fail startup instead of silently falling back. `ALLOW_UNAUTHENTICATED_LOCAL=true` is accepted only outside production and must be set explicitly; it is not a production public-access switch.
 
 Do not paste these values into documentation, issue trackers, submission forms, logs, or source control. The service never accepts or stores a LinkedIn password.
 
@@ -163,12 +165,15 @@ Store all session values in the hosting platform's secret manager. Do not place 
 
 The Docker base image is pinned by digest for reproducibility. Refresh that digest deliberately as part of dependency maintenance, then rerun the complete verification suite.
 
-The reference deployment runs on Google Cloud Run with the LinkedIn session and API bearer token stored as separate Secret Manager secrets. The API token is intentionally absent from this public repository.
+The reference deployment runs on Google Cloud Run with the LinkedIn session and rollback API bearer token stored as separate Secret Manager secrets. The challenge deployment can explicitly select the expiring `public-demo` mode without exposing either secret. The API token is intentionally absent from this public repository.
 
 ## Error contract
 
 - `400 invalid_request`: malformed body or non-profile URL.
-- `401 unauthorized`: invalid or absent API bearer token when `API_KEY` is configured.
+- `401 unauthorized`: invalid or absent API bearer token in `bearer` mode.
+- `410 public_demo_closed`: the controlled public evaluation window has ended.
+- `429 rate_limit_exceeded`: a caller or global public-demo quota was exceeded.
+- `429 public_demo_budget_exhausted`: the running instance consumed its uncached-extraction budget.
 - `502 provider_authentication_failed`: LinkedIn rejected or redirected the runtime session.
 - `502 provider_fetch_failed`: upstream failure, rate limit, checkpoint signal, or unexpected response.
 - `503 provider_not_configured`: required LinkedIn runtime secrets are absent.
@@ -182,7 +187,7 @@ The reference deployment runs on Google Cloud Run with the LinkedIn session and 
 - The process stops new LinkedIn traffic for the configured cooldown after authentication, checkpoint, consent, CAPTCHA, 429, or 999 signals; it does not retry or bypass them.
 - Empty, private, or account-invisible fields are returned as empty arrays or omitted optional fields.
 - An unrecognized zero-item response on any pagination page, a repeated page, an invalid MIME/body, or other recognized response drift fails as `provider_fetch_failed` instead of being silently classified as complete.
-- The cache is per process and is not shared across multiple instances.
+- The cache, public-demo quotas, cold-extraction budget, request pacing, and circuit state are per process. The challenge deployment therefore requires an enforced one-instance ceiling; a durable shared store would be required for a hard multi-instance quota.
 - A section returns at most 50 entries because upstream pagination and the public schema are intentionally bounded. A full fifth page or upstream page-size over-delivery adds a `possibly truncated` warning.
 - Synthetic React Flight fixtures prove deterministic parsing; the dated live smoke test is the separate compatibility check.
 

@@ -23,6 +23,7 @@ Tross emailed candidates to clarify that the LinkedIn solution must be purely re
 - [x] React Flight response extractor
 - [x] Cache and rate limiting
 - [x] Runtime-only cookie and CSRF-secret handling
+- [x] Explicit expiring public-demo mode with caller, global, cold-extraction, concurrency, pacing, and circuit-breaker bounds
 - [x] Deterministic tests
 - [x] Docker packaging
 - [x] Setup, API, approach, and limitation documentation
@@ -36,5 +37,5 @@ Tross emailed candidates to clarify that the LinkedIn solution must be purely re
 - [x] Run repository and Git-history secret scans
 - [x] Automate Git-history secret scanning in CI
 - [ ] Record and host the optional demo video
-- [ ] Create and privately deliver a dedicated reviewer token
+- [ ] Deploy and live-verify the expiring controlled public-demo mode
 - [ ] Complete the Tross submission form

@@ -3,6 +3,7 @@ import { loadConfig } from "./config.js";
 import { buildLoggerOptions } from "./logging.js";
 import { CacheProvider } from "./provider/cache-provider.js";
 import { CircuitBreakerProvider } from "./provider/circuit-breaker-provider.js";
+import { ColdExtractionBudgetProvider } from "./provider/cold-extraction-budget-provider.js";
 import { ConcurrencyProvider } from "./provider/concurrency-provider.js";
 import { DeadlineProvider } from "./provider/deadline-provider.js";
 import { LinkedInApiProvider } from "./provider/linkedin-api-provider.js";
@@ -34,14 +35,24 @@ const upstreamProvider = new DeadlineProvider(
   concurrentProvider,
   config.linkedinExtractionTimeoutMs,
 );
+const budgetedProvider = config.accessMode === "public-demo"
+  ? new ColdExtractionBudgetProvider(
+      upstreamProvider,
+      config.publicDemoMaxColdExtractions,
+    )
+  : upstreamProvider;
 const provider = new CacheProvider(
-  upstreamProvider,
+  budgetedProvider,
   config.cacheTtlMs,
   Date.now,
   config.cacheMaxEntries,
 );
 const app = await buildApp({
   provider,
+  accessMode: config.accessMode === "public-demo"
+    || (!config.apiKey && config.allowUnauthenticatedLocal)
+    ? "public-demo"
+    : "bearer",
   apiKeys: [config.apiKey, config.apiKeyPrevious]
     .filter((value): value is string => Boolean(value)),
   logger: buildLoggerOptions(config.logLevel),
@@ -49,6 +60,13 @@ const app = await buildApp({
   rateLimitMax: config.rateLimitMax,
   unauthorizedRateLimitMax: config.unauthorizedRateLimitMax,
   rateLimitWindow: config.rateLimitWindow,
+  ...(config.publicDemoExpiresAt !== undefined
+    ? { publicDemoExpiresAt: config.publicDemoExpiresAt }
+    : {}),
+  publicDemoPerClientRateLimitMax: config.publicDemoPerClientRateLimitMax,
+  publicDemoGlobalRateLimitMax: config.publicDemoGlobalRateLimitMax,
+  publicDemoRateLimitWindow: config.publicDemoRateLimitWindow,
+  publicDemoMaxColdExtractions: config.publicDemoMaxColdExtractions,
   revision: process.env.K_REVISION ?? process.env.GIT_SHA ?? "local",
 });
 

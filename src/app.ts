@@ -1,13 +1,15 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import Fastify, {
   type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
   type FastifyServerOptions,
 } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { ZodError } from "zod";
 import {
-  apiDocumentationHtml,
-  openApiDocument,
+  buildApiDocumentationHtml,
+  buildOpenApiDocument,
   publicRepositoryUrl,
 } from "./api-documentation.js";
 import { normalizeLinkedInProfileUrl, InvalidLinkedInProfileUrlError } from "./domain/linkedin-url.js";
@@ -16,11 +18,13 @@ import {
   ProviderAuthenticationError,
   ProviderFetchError,
   ProviderNotConfiguredError,
+  ProviderQuotaExceededError,
   type ProfileProvider,
 } from "./provider/profile-provider.js";
 
 export type BuildAppOptions = {
   provider: ProfileProvider;
+  accessMode?: "bearer" | "public-demo";
   apiKey?: string;
   apiKeys?: readonly string[];
   logger?: FastifyServerOptions["logger"];
@@ -28,7 +32,13 @@ export type BuildAppOptions = {
   rateLimitMax?: number;
   unauthorizedRateLimitMax?: number;
   rateLimitWindow?: string;
+  publicDemoExpiresAt?: number;
+  publicDemoPerClientRateLimitMax?: number;
+  publicDemoGlobalRateLimitMax?: number;
+  publicDemoRateLimitWindow?: string;
+  publicDemoMaxColdExtractions?: number;
   revision?: string;
+  now?: () => number;
 };
 
 function tokenDigest(value: string): Buffer {
@@ -42,6 +52,21 @@ function validBearerToken(authorization: string | undefined, apiKeys: readonly s
     matches |= Number(timingSafeEqual(supplied, tokenDigest(`Bearer ${apiKey}`)));
   }
   return matches === 1;
+}
+
+function anonymousClientKey(request: FastifyRequest): string {
+  const forwarded = request.headers["x-forwarded-for"];
+  const forwardedValue = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  const hops = typeof forwardedValue === "string"
+    ? forwardedValue.split(",").map((value) => value.trim()).filter(Boolean)
+    : [];
+  // Google front ends append their verified hops to the right. This bucket is
+  // only a fairness control; the global quota remains the security boundary.
+  const networkIdentity = hops.length >= 2 ? hops.at(-2)! : (hops.at(-1) ?? request.ip);
+  const userAgent = typeof request.headers["user-agent"] === "string"
+    ? request.headers["user-agent"]
+    : "unknown";
+  return createHash("sha256").update(`${networkIdentity}\0${userAgent}`).digest("hex");
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -58,6 +83,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     ...(options.apiKey ? [options.apiKey] : []),
     ...(options.apiKeys ?? []),
   ].map((key) => key.trim()).filter(Boolean))];
+  const accessMode = options.accessMode ?? (apiKeys.length ? "bearer" : "public-demo");
+  if (accessMode === "bearer" && apiKeys.length === 0) {
+    throw new Error("Bearer access mode requires at least one API key");
+  }
+  const now = options.now ?? Date.now;
   const activeRequests = new Set<AbortController>();
 
   app.addHook("preClose", async () => {
@@ -76,6 +106,56 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     timeWindow,
     keyGenerator: () => "authenticated-profile-api",
   });
+  const publicDemoWindow = options.publicDemoRateLimitWindow ?? "1 hour";
+  const publicDemoPerClientLimit = app.createRateLimit({
+    max: options.publicDemoPerClientRateLimitMax ?? 6,
+    timeWindow: publicDemoWindow,
+    keyGenerator: anonymousClientKey,
+  });
+  const publicDemoGlobalLimit = app.createRateLimit({
+    max: options.publicDemoGlobalRateLimitMax ?? 20,
+    timeWindow: publicDemoWindow,
+    keyGenerator: () => "public-demo-global",
+  });
+  const enforcePublicDemoLimits = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const clientLimit = await publicDemoPerClientLimit(request);
+    if ("isExceeded" in clientLimit && clientLimit.isExceeded) {
+      return reply
+        .header("retry-after", clientLimit.ttlInSeconds)
+        .code(429)
+        .send({
+          error: "rate_limit_exceeded",
+          message: "The public demo per-client quota has been exceeded",
+        });
+    }
+    const globalLimit = await publicDemoGlobalLimit(request);
+    if ("isExceeded" in globalLimit && globalLimit.isExceeded) {
+      return reply
+        .header("retry-after", globalLimit.ttlInSeconds)
+        .code(429)
+        .send({
+          error: "rate_limit_exceeded",
+          message: "The public demo global quota has been exceeded",
+        });
+    }
+  };
+  const accessDescription = accessMode === "bearer"
+    ? { mode: "bearer" as const }
+    : {
+        mode: "public-demo" as const,
+        ...(options.publicDemoExpiresAt !== undefined
+          ? { expiresAt: new Date(options.publicDemoExpiresAt).toISOString() }
+          : {}),
+        perClientMax: options.publicDemoPerClientRateLimitMax ?? 6,
+        globalMax: options.publicDemoGlobalRateLimitMax ?? 20,
+        timeWindow: publicDemoWindow,
+        maxColdExtractions: options.publicDemoMaxColdExtractions ?? 50,
+      };
+  const openApiDocument = buildOpenApiDocument(accessDescription);
+  const apiDocumentationHtml = buildApiDocumentationHtml(accessDescription);
 
   app.addHook("onRequest", async (request, reply) => {
     if (request.url.startsWith("/v1/profiles")) {
@@ -93,8 +173,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       health: "/health",
       documentation: "/docs",
       openapi: "/openapi.json",
-      profile: "POST /v1/profiles (Bearer token required)",
+      profile: accessMode === "bearer"
+        ? "POST /v1/profiles (Bearer token required)"
+        : "POST /v1/profiles (Controlled public demo)",
     },
+    access: accessDescription,
     source: publicRepositoryUrl,
   }));
 
@@ -113,7 +196,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   app.post("/v1/profiles", {
     onRequest: async (request, reply) => {
-      if (apiKeys.length && !validBearerToken(request.headers.authorization, apiKeys)) {
+      if (accessMode === "public-demo"
+        && options.publicDemoExpiresAt !== undefined
+        && now() >= options.publicDemoExpiresAt) {
+        return reply.code(410).send({
+          error: "public_demo_closed",
+          message: "The controlled public evaluation window has ended",
+        });
+      }
+      if (accessMode === "bearer"
+        && !validBearerToken(request.headers.authorization, apiKeys)) {
         const limit = await unauthorizedLimit(request);
         if ("isExceeded" in limit && limit.isExceeded) {
           return reply
@@ -130,7 +222,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         });
       }
     },
-    preHandler: authenticatedLimit,
+    preHandler: accessMode === "bearer"
+      ? authenticatedLimit
+      : enforcePublicDemoLimits,
   }, async (request, reply) => {
     const requestController = new AbortController();
     const cancel = () => requestController.abort(new ProviderFetchError("Client disconnected"));
@@ -157,6 +251,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       }
       if (error instanceof ProviderNotConfiguredError) {
         return reply.code(503).send({ error: "provider_not_configured", message: error.message });
+      }
+      if (error instanceof ProviderQuotaExceededError) {
+        return reply.code(429).send({
+          error: "public_demo_budget_exhausted",
+          message: error.message,
+        });
       }
       if (error instanceof ProviderAuthenticationError) {
         return reply.code(502).send({ error: "provider_authentication_failed", message: error.message });

@@ -5,7 +5,8 @@ This service depends on undocumented LinkedIn HTTP and React Flight contracts. I
 ## Implemented controls
 
 - Strict HTTPS `linkedin.com/in/<slug>` canonicalization rejects credentials, ports, malformed encoding, encoded separators, controls, and non-identifier characters before provider access.
-- Production refuses to start without an API key. A previous key can overlap briefly for rotation, and unauthorized traffic has a separate peer-address quota so it cannot consume the valid-caller quota.
+- Bearer mode is the production default and refuses to start without an API key. A previous key can overlap briefly for rotation, and unauthorized traffic has a separate peer-address quota so it cannot consume the valid-caller quota.
+- Controlled public access requires the explicit `public-demo` mode and a parseable expiry timestamp. It has separate hashed per-client and global quotas, closes automatically at expiry, and spends a bounded cold-extraction credit only after a cache miss. The client bucket is a fairness control; the global bucket, extraction budget, one-instance ceiling, provider concurrency, pacing, and circuit breaker bound account exposure.
 - Profile requests use a small body limit and `no-store`; logs redact caller authorization, cookies, request bodies, and extracted response bodies.
 - Completed cache entries have TTL and LRU bounds. Same-profile misses coalesce, but one disconnected consumer does not cancel work still needed by another; all-consumer cancellation does.
 - One extraction-wide deadline includes queue time. Distinct profiles have a FIFO concurrency bound, and LinkedIn requests share rolling-window pacing plus minimum spacing.
@@ -19,7 +20,7 @@ This service depends on undocumented LinkedIn HTTP and React Flight contracts. I
 
 The local suite covers:
 
-- Malformed URLs, percent escapes, encoded slash/backslash/double encoding, credentials, ports, Unicode slugs, oversized bodies, absent/invalid/current/previous API keys, quota separation, and health-route isolation.
+- Malformed URLs, percent escapes, encoded slash/backslash/double encoding, credentials, ports, Unicode slugs, oversized bodies, absent/invalid/current/previous API keys, explicit public-demo configuration and expiry, per-client/global quota separation, cold-extraction budgeting, and health-route isolation.
 - Missing/expired session configuration; 401/403; login/checkpoint redirects; HTTP 429/999; HTTP-200 auth, challenge, and consent pages; timeout; deletion; wrong or missing MIME; oversized, truncated, and malformed UTF-8 bodies.
 - Overall deadline expiry while active and queued, FIFO fairness, limiter cancellation both during a timed wait and behind another waiter, slot release after failure, and graceful shutdown cancellation.
 - Circuit opening, queued-call suppression, peer cancellation, authentication-triggered opening, and cooldown recovery.

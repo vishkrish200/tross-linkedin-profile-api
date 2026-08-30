@@ -2,9 +2,15 @@ export type AppConfig = {
   host: string;
   port: number;
   logLevel: string;
+  accessMode: "bearer" | "public-demo";
   apiKey?: string;
   apiKeyPrevious?: string;
   allowUnauthenticatedLocal: boolean;
+  publicDemoExpiresAt?: number;
+  publicDemoPerClientRateLimitMax: number;
+  publicDemoGlobalRateLimitMax: number;
+  publicDemoRateLimitWindow: string;
+  publicDemoMaxColdExtractions: number;
   requestBodyLimitBytes: number;
   cacheTtlMs: number;
   cacheMaxEntries: number;
@@ -43,19 +49,57 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const apiKey = env.API_KEY?.trim() ? env.API_KEY : undefined;
   const apiKeyPrevious = env.API_KEY_PREVIOUS?.trim() ? env.API_KEY_PREVIOUS : undefined;
   const allowUnauthenticatedLocal = env.ALLOW_UNAUTHENTICATED_LOCAL === "true";
-  if (!apiKey && (!allowUnauthenticatedLocal || env.NODE_ENV === "production")) {
+  const accessMode = env.ACCESS_MODE?.trim() || "bearer";
+  if (accessMode !== "bearer" && accessMode !== "public-demo") {
+    throw new Error("ACCESS_MODE must be either bearer or public-demo");
+  }
+  if (!apiKey
+    && accessMode !== "public-demo"
+    && (!allowUnauthenticatedLocal || env.NODE_ENV === "production")) {
     throw new Error(
       "API_KEY is required; set ALLOW_UNAUTHENTICATED_LOCAL=true only for local development",
     );
+  }
+  const publicDemoExpiresAtRaw = env.PUBLIC_DEMO_EXPIRES_AT?.trim();
+  const publicDemoExpiresAt = publicDemoExpiresAtRaw
+    ? Date.parse(publicDemoExpiresAtRaw)
+    : undefined;
+  if (accessMode === "public-demo"
+    && (publicDemoExpiresAt === undefined || !Number.isFinite(publicDemoExpiresAt))) {
+    throw new Error("PUBLIC_DEMO_EXPIRES_AT must be a valid timestamp in public-demo mode");
   }
 
   return {
     host: env.HOST || "0.0.0.0",
     port: integer(env, "PORT", 3000, 1, 65_535),
     logLevel: env.LOG_LEVEL || "info",
+    accessMode,
     ...(apiKey ? { apiKey } : {}),
     ...(apiKeyPrevious ? { apiKeyPrevious } : {}),
     allowUnauthenticatedLocal,
+    ...(publicDemoExpiresAt !== undefined ? { publicDemoExpiresAt } : {}),
+    publicDemoPerClientRateLimitMax: integer(
+      env,
+      "PUBLIC_DEMO_PER_CLIENT_RATE_LIMIT_MAX",
+      6,
+      1,
+      1_000,
+    ),
+    publicDemoGlobalRateLimitMax: integer(
+      env,
+      "PUBLIC_DEMO_GLOBAL_RATE_LIMIT_MAX",
+      20,
+      1,
+      10_000,
+    ),
+    publicDemoRateLimitWindow: env.PUBLIC_DEMO_RATE_LIMIT_WINDOW || "1 hour",
+    publicDemoMaxColdExtractions: integer(
+      env,
+      "PUBLIC_DEMO_MAX_COLD_EXTRACTIONS",
+      50,
+      1,
+      10_000,
+    ),
     requestBodyLimitBytes: integer(env, "REQUEST_BODY_LIMIT_BYTES", 8_192, 1_024, 65_536),
     cacheTtlMs: integer(env, "CACHE_TTL_SECONDS", 900, 0, 86_400) * 1000,
     cacheMaxEntries: integer(env, "CACHE_MAX_ENTRIES", 250, 1, 10_000),

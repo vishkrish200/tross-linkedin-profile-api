@@ -11,12 +11,25 @@ import {
 export const publicRepositoryUrl = "https://github.com/vishkrish200/tross-linkedin-profile-api";
 export const publicApiUrl = "https://tross-linkedin-profile-api-583248531894.asia-south1.run.app";
 
+export type ApiAccessDescription =
+  | { mode: "bearer" }
+  | {
+      mode: "public-demo";
+      expiresAt?: string;
+      perClientMax: number;
+      globalMax: number;
+      timeWindow: string;
+      maxColdExtractions: number;
+    };
+
 function jsonSchema(schema: z.ZodType) {
   const { $schema: _schemaDialect, ...document } = z.toJSONSchema(schema);
   return document;
 }
 
-export const openApiDocument = {
+export function buildOpenApiDocument(access: ApiAccessDescription) {
+  const bearerProtected = access.mode === "bearer";
+  return {
   openapi: "3.1.0",
   info: {
     title: "LinkedIn Profile API",
@@ -31,7 +44,12 @@ export const openApiDocument = {
   servers: [{ url: publicApiUrl }],
   tags: [
     { name: "Discovery", description: "Public service metadata and health." },
-    { name: "Profiles", description: "Authenticated profile extraction." },
+    {
+      name: "Profiles",
+      description: bearerProtected
+        ? "Authenticated profile extraction."
+        : "Controlled public-demo profile extraction.",
+    },
   ],
   paths: {
     "/": {
@@ -79,7 +97,7 @@ export const openApiDocument = {
         description:
           "Returns profile information visible to the configured authorized LinkedIn session. The service does not retry or bypass authentication, checkpoint, CAPTCHA, 429, or 999 signals.",
         operationId: "extractLinkedInProfile",
-        security: [{ bearerAuth: [] }],
+        ...(bearerProtected ? { security: [{ bearerAuth: [] }] } : {}),
         requestBody: {
           required: true,
           content: {
@@ -99,7 +117,8 @@ export const openApiDocument = {
             },
           },
           "400": { $ref: "#/components/responses/InvalidRequest" },
-          "401": { $ref: "#/components/responses/Unauthorized" },
+          ...(bearerProtected ? { "401": { $ref: "#/components/responses/Unauthorized" } } : {}),
+          ...(!bearerProtected ? { "410": { $ref: "#/components/responses/DemoClosed" } } : {}),
           "429": { $ref: "#/components/responses/RateLimited" },
           "502": { $ref: "#/components/responses/ProviderFailure" },
           "503": { $ref: "#/components/responses/ProviderNotConfigured" },
@@ -108,17 +127,19 @@ export const openApiDocument = {
     },
   },
   components: {
-    securitySchemes: {
-      bearerAuth: {
-        type: "http",
-        scheme: "bearer",
-        description: "Dedicated reviewer token supplied separately from the public repository.",
+    ...(bearerProtected ? {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          description: "A separately provisioned API bearer token.",
+        },
       },
-    },
+    } : {}),
     schemas: {
       Discovery: {
         type: "object",
-        required: ["name", "status", "revision", "runtime", "endpoints", "source"],
+        required: ["name", "status", "revision", "runtime", "endpoints", "access", "source"],
         properties: {
           name: { type: "string", example: "LinkedIn Profile API" },
           status: { type: "string", const: "ok" },
@@ -128,6 +149,32 @@ export const openApiDocument = {
             type: "object",
             additionalProperties: { type: "string" },
           },
+          access: bearerProtected
+            ? {
+                type: "object",
+                additionalProperties: false,
+                required: ["mode"],
+                properties: { mode: { type: "string", const: "bearer" } },
+              }
+            : {
+                type: "object",
+                additionalProperties: false,
+                required: [
+                  "mode",
+                  "perClientMax",
+                  "globalMax",
+                  "timeWindow",
+                  "maxColdExtractions",
+                ],
+                properties: {
+                  mode: { type: "string", const: "public-demo" },
+                  expiresAt: { type: "string", format: "date-time" },
+                  perClientMax: { type: "integer", minimum: 1 },
+                  globalMax: { type: "integer", minimum: 1 },
+                  timeWindow: { type: "string" },
+                  maxColdExtractions: { type: "integer", minimum: 1 },
+                },
+              },
           source: { type: "string", format: "uri" },
         },
       },
@@ -162,6 +209,10 @@ export const openApiDocument = {
         description: "The bearer token is missing or invalid.",
         content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
       },
+      DemoClosed: {
+        description: "The controlled public evaluation window has ended.",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+      },
       RateLimited: {
         description: "The caller quota has been exceeded.",
         headers: {
@@ -179,7 +230,8 @@ export const openApiDocument = {
       },
     },
   },
-} as const;
+  } as const;
+}
 
 const profileResponseExample = `{
   "data": {
@@ -198,7 +250,33 @@ const profileResponseExample = `{
   }
 }`;
 
-export const apiDocumentationHtml = `<!doctype html>
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]!);
+}
+
+export function buildApiDocumentationHtml(access: ApiAccessDescription): string {
+  const bearerProtected = access.mode === "bearer";
+  const authenticationLabel = bearerProtected ? "Bearer token" : "Controlled public demo";
+  const requestDescription = bearerProtected
+    ? "Accepts one canonical LinkedIn profile URL. A bearer token is required."
+    : `Accepts one canonical LinkedIn profile URL without a caller token. Public access is limited to ${access.perClientMax} requests per client and ${access.globalMax} requests globally per ${escapeHtml(access.timeWindow)}.`;
+  const authorizationHeader = bearerProtected
+    ? [' \\', '  -H "authorization: Bearer $API_KEY"'].join("\n")
+    : "";
+  const expiryLine = !bearerProtected && access.expiresAt
+    ? `<p class="note"><strong>Evaluation window:</strong> public access closes automatically at ${escapeHtml(access.expiresAt)}. The process allows at most ${access.maxColdExtractions} uncached profile extractions before restart.</p>`
+    : "";
+  const accessFailureRow = bearerProtected
+    ? "<tr><td><code>401</code></td><td>Missing or invalid API bearer token.</td></tr>"
+    : "<tr><td><code>410</code></td><td>The controlled public evaluation window has ended.</td></tr>";
+
+  return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -326,18 +404,18 @@ export const apiDocumentationHtml = `<!doctype html>
           <div class="status-line"><span>Service</span><strong><span class="dot"></span>Online</strong></div>
           <div class="status-line"><span>Transport</span><strong>HTTPS + JSON</strong></div>
           <div class="status-line"><span>Runtime</span><strong>No browser</strong></div>
-          <div class="status-line"><span>Authentication</span><strong>Bearer token</strong></div>
+          <div class="status-line"><span>Access</span><strong>${authenticationLabel}</strong></div>
         </aside>
       </div>
 
       <section id="request">
         <h2>Request</h2>
         <div class="content">
-          <div class="endpoint"><span class="method">POST</span><span class="path">/v1/profiles</span><p>Accepts one canonical LinkedIn profile URL. A dedicated reviewer token is supplied separately.</p></div>
+          <div class="endpoint"><span class="method">POST</span><span class="path">/v1/profiles</span><p>${requestDescription}</p></div>
           <pre><code>curl -sS ${publicApiUrl}/v1/profiles \\
-  -H 'content-type: application/json' \\
-  -H "authorization: Bearer $API_KEY" \\
+  -H 'content-type: application/json'${authorizationHeader} \\
   -d '{"url":"https://www.linkedin.com/in/example-person/"}'</code></pre>
+          ${expiryLine}
           <p class="note">Only HTTPS <strong>linkedin.com/in/&lt;slug&gt;</strong> URLs are accepted. Query strings and fragments are removed before upstream access.</p>
         </div>
       </section>
@@ -366,7 +444,7 @@ export const apiDocumentationHtml = `<!doctype html>
             <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
             <tbody>
               <tr><td><code>400</code></td><td>Malformed body or unsupported profile URL.</td></tr>
-              <tr><td><code>401</code></td><td>Missing or invalid API bearer token.</td></tr>
+              ${accessFailureRow}
               <tr><td><code>429</code></td><td>Caller quota exceeded; respect <code>Retry-After</code>.</td></tr>
               <tr><td><code>502</code></td><td>LinkedIn authentication, protection, transport, or response-contract failure.</td></tr>
               <tr><td><code>503</code></td><td>LinkedIn runtime credentials are not configured.</td></tr>
@@ -380,3 +458,4 @@ export const apiDocumentationHtml = `<!doctype html>
   </div>
 </body>
 </html>`;
+}

@@ -42,3 +42,10 @@ export class ProviderCircuitOpenError extends ProviderFetchError {
     this.name = "ProviderCircuitOpenError";
   }
 }
+
+export class ProviderQuotaExceededError extends Error {
+  constructor(message = "The public demo cold-extraction budget is exhausted") {
+    super(message);
+    this.name = "ProviderQuotaExceededError";
+  }
+}
