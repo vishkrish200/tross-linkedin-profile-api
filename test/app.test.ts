@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import {
   ProviderBusyError,
+  ProviderProfileUnavailableError,
   ProviderQuotaExceededError,
   type ProfileProvider,
 } from "../src/provider/profile-provider.js";
@@ -63,6 +64,7 @@ describe("profile API", () => {
       },
     });
     expect(openApi.components.schemas.Profile.properties.skills.maxItems).toBe(50);
+    expect(openApi.paths["/v1/profiles"].post.responses["404"]).toBeDefined();
     await app.close();
   });
 
@@ -497,6 +499,28 @@ describe("profile API", () => {
     expect(response.json()).toEqual({
       error: "provider_fetch_failed",
       message: "LinkedIn response did not satisfy the public profile contract",
+    });
+    await app.close();
+  });
+
+  it("returns a distinct error when the profile is unavailable to the session", async () => {
+    const app = await buildApp({
+      provider: {
+        async fetch() {
+          throw new ProviderProfileUnavailableError();
+        },
+      },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/profiles",
+      payload: { url: "https://www.linkedin.com/in/unavailable-person/" },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({
+      error: "profile_unavailable",
+      message: "LinkedIn profile is unavailable to the configured session",
     });
     await app.close();
   });

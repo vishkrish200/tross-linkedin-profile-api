@@ -18,6 +18,7 @@ import {
   ProviderBusyError,
   ProviderFetchError,
   ProviderNotConfiguredError,
+  ProviderProfileUnavailableError,
   ProviderQuotaExceededError,
   type ProfileProvider,
 } from "./provider/profile-provider.js";
@@ -362,6 +363,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     } catch (error) {
       if (error instanceof ProviderNotConfiguredError) {
         return reply.code(503).send({ error: "provider_not_configured", message: error.message });
+      }
+      if (error instanceof ProviderProfileUnavailableError) {
+        return reply.code(404).send({ error: "profile_unavailable", message: error.message });
       }
       if (error instanceof ProviderQuotaExceededError) {
         return reply.code(429).send({

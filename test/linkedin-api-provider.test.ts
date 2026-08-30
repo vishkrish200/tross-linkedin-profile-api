@@ -4,6 +4,7 @@ import {
   ProviderAuthenticationError,
   ProviderFetchError,
   ProviderNotConfiguredError,
+  ProviderProfileUnavailableError,
   ProviderProtectionError,
 } from "../src/provider/profile-provider.js";
 import {
@@ -448,15 +449,37 @@ describe("LinkedInApiProvider", () => {
     });
   });
 
-  it("rejects a deleted profile response", async () => {
+  it("classifies an HTTP 404 profile response as unavailable", async () => {
     const provider = new LinkedInApiProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 404 })),
     });
-    await expect(provider.fetch("https://www.linkedin.com/in/deleted-profile/")).rejects.toMatchObject({
-      name: "ProviderFetchError",
-      message: "LinkedIn returned 404",
+    await expect(provider.fetch("https://www.linkedin.com/in/deleted-profile/"))
+      .rejects.toBeInstanceOf(ProviderProfileUnavailableError);
+  });
+
+  it("classifies a soft unavailable profile page without hiding unknown shape drift", async () => {
+    const unavailableHtml = profileHtml
+      .replaceAll("profile-example", "")
+      .replace("</body>", "<p>This profile is not available.</p></body>");
+    const unavailable = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(htmlResponse(unavailableHtml)),
     });
+    await expect(unavailable.fetch("https://www.linkedin.com/in/unavailable-profile/"))
+      .rejects.toBeInstanceOf(ProviderProfileUnavailableError);
+
+    const unknownShape = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
+        htmlResponse(profileHtml.replaceAll("profile-example", "")),
+      ),
+    });
+    await expect(unknownShape.fetch("https://www.linkedin.com/in/unknown-shape/"))
+      .rejects.toMatchObject({
+        name: "ProviderFetchError",
+        message: "LinkedIn's profile page did not contain a profile identifier",
+      });
   });
 
   it("fails closed when a section response changes shape instead of treating it as empty", async () => {

@@ -172,6 +172,7 @@ The reference deployment runs on Google Cloud Run with the LinkedIn session and 
 
 - `400 invalid_request`: malformed body or non-profile URL.
 - `401 unauthorized`: invalid or absent API bearer token in `bearer` mode.
+- `404 profile_unavailable`: LinkedIn reports that the profile is unavailable to the configured session.
 - `410 public_demo_closed`: the controlled public evaluation window has ended.
 - `413 payload_too_large`: the body exceeds the configured request limit.
 - `415 unsupported_media_type`: the request does not use a JSON content type.

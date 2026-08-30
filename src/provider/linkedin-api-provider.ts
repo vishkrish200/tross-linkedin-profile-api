@@ -15,6 +15,7 @@ import {
   ProviderAuthenticationError,
   ProviderFetchError,
   ProviderNotConfiguredError,
+  ProviderProfileUnavailableError,
   ProviderProtectionError,
   type ProfileFetchOptions,
   type ProfileProvider,
@@ -62,6 +63,11 @@ function assertNoProtectionPage(content: string): void {
   if (challengeTarget || captchaMarkup || (verificationTitle && verificationHeading)) {
     throw new ProviderProtectionError();
   }
+}
+
+function isUnavailableProfilePage(content: string): boolean {
+  return /profile (?:is not available|unavailable|not found)|this page (?:doesn.t exist|isn.t available)|page not found/i
+    .test(content);
 }
 
 type ResponseKind = "profile" | "rsc";
@@ -249,7 +255,11 @@ export class LinkedInApiProvider implements ProfileProvider {
       "user-agent": userAgent,
     };
 
-    const perform = async (url: URL, init: RequestInit): Promise<Response> => {
+    const perform = async (
+      url: URL,
+      init: RequestInit,
+      profileRequest = false,
+    ): Promise<Response> => {
       let response: Response;
       try {
         await this.config.requestLimiter?.acquire(options.signal);
@@ -275,6 +285,9 @@ export class LinkedInApiProvider implements ProfileProvider {
       if (response.status === 429 || response.status === 999) {
         throw new ProviderProtectionError();
       }
+      if (profileRequest && [404, 410].includes(response.status)) {
+        throw new ProviderProfileUnavailableError();
+      }
       if (!response.ok) throw new ProviderFetchError(`LinkedIn returned ${response.status}`);
       return response;
     };
@@ -299,10 +312,11 @@ export class LinkedInApiProvider implements ProfileProvider {
     const profileResponse = await perform(profileEndpoint, {
       method: "GET",
       headers: { ...commonHeaders, accept: "text/html,application/xhtml+xml" },
-    });
+    }, true);
     const profileHtml = await readResponse(profileResponse, "profile");
     const identity = extractIdentity(profileHtml);
     if (!identity.profileId) {
+      if (isUnavailableProfilePage(profileHtml)) throw new ProviderProfileUnavailableError();
       throw new ProviderFetchError("LinkedIn's profile page did not contain a profile identifier");
     }
 

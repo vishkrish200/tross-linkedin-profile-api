@@ -29,6 +29,13 @@ export class ProviderFetchError extends Error {
   }
 }
 
+export class ProviderProfileUnavailableError extends Error {
+  constructor(message = "LinkedIn profile is unavailable to the configured session") {
+    super(message);
+    this.name = "ProviderProfileUnavailableError";
+  }
+}
+
 export class ProviderProtectionError extends ProviderFetchError {
   constructor(message = "LinkedIn rate-limited or challenged the direct request") {
     super(message);

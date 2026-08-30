@@ -117,6 +117,7 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
           },
           "400": { $ref: "#/components/responses/InvalidRequest" },
           ...(bearerProtected ? { "401": { $ref: "#/components/responses/Unauthorized" } } : {}),
+          "404": { $ref: "#/components/responses/ProfileUnavailable" },
           ...(!bearerProtected ? { "410": { $ref: "#/components/responses/DemoClosed" } } : {}),
           "413": { $ref: "#/components/responses/PayloadTooLarge" },
           "415": { $ref: "#/components/responses/UnsupportedMediaType" },
@@ -229,6 +230,10 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
         headers: {
           "Retry-After": { schema: { type: "integer" } },
         },
+        content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+      },
+      ProfileUnavailable: {
+        description: "The LinkedIn profile is unavailable to the configured session.",
         content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
       },
       ProviderFailure: {
@@ -460,6 +465,7 @@ export function buildApiDocumentationHtml(access: ApiAccessDescription): string 
             <tbody>
               <tr><td><code>400</code></td><td>Malformed body or unsupported profile URL.</td></tr>
               ${accessFailureRow}
+              <tr><td><code>404</code></td><td>The LinkedIn profile is unavailable to the configured session.</td></tr>
               <tr><td><code>413</code></td><td>Request body exceeds the configured size limit.</td></tr>
               <tr><td><code>415</code></td><td>Request content type is not JSON.</td></tr>
               <tr><td><code>429</code></td><td>Caller quota, cold-extraction budget, or bounded distinct-profile queue exceeded; respect <code>Retry-After</code>.</td></tr>

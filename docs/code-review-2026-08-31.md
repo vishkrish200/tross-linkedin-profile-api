@@ -53,18 +53,23 @@ The work is isolated on `codex/full-codebase-review`. It has not been pushed, de
 | TypeScript, including unused locals/parameters | Pass |
 | Source lint | Pass, zero warnings |
 | Bearer and public-demo OpenAPI lint | Pass |
-| Deterministic tests | 173/173 pass across all 13 test files |
-| Coverage | 94.65% statements, 86.39% branches, 96.61% functions, 96.57% lines |
+| Deterministic tests | 175/175 pass across all 13 test files |
+| Coverage | 94.69% statements, 86.58% branches, 96.63% functions, 96.69% lines |
 | Production compile | Pass; clean runtime-only `dist/` |
 | Production dependency audit | 0 reported vulnerabilities |
-| Gitleaks working tree and all 26 commits | No leaks found |
+| Gitleaks working tree and all 28 reachable commits | No leaks found |
 | Docker build and artifact inspection | Pass; no developer scripts, stale browser provider, `npm`, or `npx` in runtime |
 | Container endpoint smoke | Discovery, health, and OpenAPI pass; runtime user is `node` |
 | Independent Opus closure review | Four final findings closed; no new regression; `RELEASE` |
 
-Every committed synthetic profile fixture and adversarial shape is exercised by the deterministic suite. A fresh replay of the prior 13-case authorized live matrix was also attempted through this branch's local server and pacing controls. Case 1 returned HTTP 200 with all core identity fields and its rich sections; case 2 returned `502 provider_fetch_failed`. The run stopped immediately without retrying or calling the remaining 11 profiles because the response could represent authentication, protection, or upstream drift.
+Every committed synthetic profile fixture and adversarial shape is exercised by the deterministic suite. The prior 13-case authorized live matrix was also replayed through this branch's local server using its normal pacing, deadline, and circuit controls.
 
-Therefore the fresh live matrix is **incomplete, not passed**. The prior dated 13/13 evidence in `acceptance.md` belongs to the earlier deployed revision and is not presented as proof for this branch. A future authorized canary should resume only after confirming session/upstream health and should keep the same privacy-minimized stop rules.
+- All eight profiles still available to the authorized session returned HTTP 200 with core identity fields and schema-valid output. The sample covered rich and sparse sections, About-present and About-absent profiles, pagination, certifications, languages, images, and two expected 50-skill truncation warnings.
+- Five historical profiles returned explicit LinkedIn unavailable/error pages with no profile identifier. All five now return `404 profile_unavailable`; an unknown missing-profile-identifier shape still fails loudly as `502 provider_fetch_failed`.
+- One available profile reached the 25-second application deadline only after the cold batch saturated the process-wide 60-request rolling limiter. It passed alone in 5.8 seconds after the limiter window cleared, identifying a batch-safety boundary rather than an extraction defect.
+- No authentication, checkpoint, CAPTCHA, HTTP 429/999, or circuit-opening signal occurred.
+
+This is complete behavior evidence for all 13 cases in the dated matrix: eight successful extractions and five correctly classified unavailable profiles. It is not a claim that all 13 remain extractable or that every LinkedIn profile is supported.
 
 ## Residual risks
 
