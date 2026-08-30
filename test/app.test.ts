@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import {
+  ProviderBusyError,
   ProviderQuotaExceededError,
   type ProfileProvider,
 } from "../src/provider/profile-provider.js";
@@ -74,6 +75,7 @@ describe("profile API", () => {
       publicDemoGlobalRateLimitMax: 20,
       publicDemoRateLimitWindow: "1 hour",
       publicDemoMaxColdExtractions: 50,
+      maxQueuedDistinctProfiles: 4,
       now: () => expiresAt - 1,
     });
 
@@ -85,6 +87,7 @@ describe("profile API", () => {
       globalMax: 20,
       timeWindow: "1 hour",
       maxColdExtractions: 50,
+      maxQueuedDistinctProfiles: 4,
     });
 
     const documentation = await app.inject({ method: "GET", url: "/docs" });
@@ -170,6 +173,28 @@ describe("profile API", () => {
     await app.close();
   });
 
+  it("admits a 100-request reviewer burst below the public-demo ingress limits", async () => {
+    const app = await buildApp({
+      provider,
+      accessMode: "public-demo",
+      publicDemoPerClientRateLimitMax: 120,
+      publicDemoGlobalRateLimitMax: 180,
+      publicDemoRateLimitWindow: "1 minute",
+    });
+    const responses = await Promise.all(Array.from({ length: 100 }, () => app.inject({
+      method: "POST",
+      url: "/v1/profiles",
+      headers: {
+        "user-agent": "reviewer-burst-test",
+        "x-forwarded-for": "203.0.113.1, 35.191.0.1",
+      },
+      payload: { url: "https://www.linkedin.com/in/test-person/" },
+    })));
+
+    expect(responses.every(({ statusCode }) => statusCode === 200)).toBe(true);
+    await app.close();
+  });
+
   it("maps an exhausted cold-extraction budget to a bounded public error", async () => {
     const app = await buildApp({
       accessMode: "public-demo",
@@ -186,6 +211,29 @@ describe("profile API", () => {
     });
     expect(response.statusCode).toBe(429);
     expect(response.json().error).toBe("public_demo_budget_exhausted");
+    await app.close();
+  });
+
+  it("returns a retryable overload response when the distinct-profile queue is full", async () => {
+    const app = await buildApp({
+      accessMode: "public-demo",
+      provider: {
+        async fetch() {
+          throw new ProviderBusyError();
+        },
+      },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/profiles",
+      payload: { url: "https://www.linkedin.com/in/test-person/" },
+    });
+    expect(response.statusCode).toBe(429);
+    expect(response.headers["retry-after"]).toBe("5");
+    expect(response.json()).toMatchObject({
+      error: "provider_busy",
+      message: expect.stringContaining("retry shortly"),
+    });
     await app.close();
   });
 

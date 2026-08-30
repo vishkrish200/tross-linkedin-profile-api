@@ -24,6 +24,7 @@ export type AppConfig = {
   linkedinMaxResponseBytes: number;
   linkedinExtractionTimeoutMs: number;
   linkedinMaxConcurrency: number;
+  linkedinMaxQueueSize: number;
   linkedinBreakerCooldownMs: number;
   linkedinRequestsPerMinute: number;
   linkedinMinRequestIntervalMs: number;
@@ -94,22 +95,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     publicDemoPerClientRateLimitMax: integer(
       env,
       "PUBLIC_DEMO_PER_CLIENT_RATE_LIMIT_MAX",
-      6,
+      120,
       1,
       1_000,
     ),
     publicDemoGlobalRateLimitMax: integer(
       env,
       "PUBLIC_DEMO_GLOBAL_RATE_LIMIT_MAX",
-      20,
+      180,
       1,
       10_000,
     ),
-    publicDemoRateLimitWindow: env.PUBLIC_DEMO_RATE_LIMIT_WINDOW || "1 hour",
+    publicDemoRateLimitWindow: env.PUBLIC_DEMO_RATE_LIMIT_WINDOW || "1 minute",
     publicDemoMaxColdExtractions: integer(
       env,
       "PUBLIC_DEMO_MAX_COLD_EXTRACTIONS",
-      50,
+      100,
       1,
       10_000,
     ),
@@ -138,6 +139,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       120_000,
     ),
     linkedinMaxConcurrency: integer(env, "LINKEDIN_MAX_CONCURRENCY", 2, 1, 20),
+    linkedinMaxQueueSize: integer(env, "LINKEDIN_MAX_QUEUE_SIZE", 4, 0, 1_000),
     linkedinBreakerCooldownMs: integer(
       env,
       "LINKEDIN_BREAKER_COOLDOWN_SECONDS",

@@ -49,3 +49,10 @@ export class ProviderQuotaExceededError extends Error {
     this.name = "ProviderQuotaExceededError";
   }
 }
+
+export class ProviderBusyError extends Error {
+  constructor(message = "Too many distinct uncached profiles are already being processed") {
+    super(message);
+    this.name = "ProviderBusyError";
+  }
+}

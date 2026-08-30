@@ -16,6 +16,7 @@ export type ApiAccessDescription =
       globalMax: number;
       timeWindow: string;
       maxColdExtractions: number;
+      maxQueuedDistinctProfiles: number;
     };
 
 function jsonSchema(schema: z.ZodType) {
@@ -166,6 +167,7 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
                   "globalMax",
                   "timeWindow",
                   "maxColdExtractions",
+                  "maxQueuedDistinctProfiles",
                 ],
                 properties: {
                   mode: { type: "string", const: "public-demo" },
@@ -174,6 +176,7 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
                   globalMax: { type: "integer", minimum: 1 },
                   timeWindow: { type: "string" },
                   maxColdExtractions: { type: "integer", minimum: 1 },
+                  maxQueuedDistinctProfiles: { type: "integer", minimum: 0 },
                 },
               },
           source: { type: "string", format: "uri" },
@@ -277,7 +280,7 @@ export function buildApiDocumentationHtml(access: ApiAccessDescription): string 
   const authenticationLabel = bearerProtected ? "Bearer token" : "Controlled public demo";
   const requestDescription = bearerProtected
     ? "Accepts one canonical LinkedIn profile URL. A bearer token is required."
-    : `Accepts one canonical LinkedIn profile URL without a caller token. Public access is limited to ${access.perClientMax} requests per client and ${access.globalMax} requests globally per ${escapeHtml(access.timeWindow)}.`;
+    : `Accepts one canonical LinkedIn profile URL without a caller token. Public access is limited to ${access.perClientMax} requests per client and ${access.globalMax} requests globally per ${escapeHtml(access.timeWindow)}. Cache hits and simultaneous requests for the same profile share work; at most ${access.maxQueuedDistinctProfiles} distinct uncached profiles wait behind active extraction.`;
   const authorizationHeader = bearerProtected
     ? [' \\', '  -H "authorization: Bearer $API_KEY"'].join("\n")
     : "";
@@ -459,7 +462,7 @@ export function buildApiDocumentationHtml(access: ApiAccessDescription): string 
               ${accessFailureRow}
               <tr><td><code>413</code></td><td>Request body exceeds the configured size limit.</td></tr>
               <tr><td><code>415</code></td><td>Request content type is not JSON.</td></tr>
-              <tr><td><code>429</code></td><td>Caller quota exceeded; respect <code>Retry-After</code>.</td></tr>
+              <tr><td><code>429</code></td><td>Caller quota, cold-extraction budget, or bounded distinct-profile queue exceeded; respect <code>Retry-After</code>.</td></tr>
               <tr><td><code>500</code></td><td>Unexpected internal server error.</td></tr>
               <tr><td><code>502</code></td><td>LinkedIn authentication, protection, transport, or response-contract failure.</td></tr>
               <tr><td><code>503</code></td><td>LinkedIn runtime credentials are not configured.</td></tr>

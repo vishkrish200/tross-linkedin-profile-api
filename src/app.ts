@@ -16,6 +16,7 @@ import { normalizeLinkedInProfileUrl, InvalidLinkedInProfileUrlError } from "./d
 import { profileRequestSchema, profileSchema } from "./domain/profile.js";
 import {
   ProviderAuthenticationError,
+  ProviderBusyError,
   ProviderFetchError,
   ProviderNotConfiguredError,
   ProviderQuotaExceededError,
@@ -37,6 +38,7 @@ export type BuildAppOptions = {
   publicDemoGlobalRateLimitMax?: number;
   publicDemoRateLimitWindow?: string;
   publicDemoMaxColdExtractions?: number;
+  maxQueuedDistinctProfiles?: number;
   revision?: string;
   now?: () => number;
 };
@@ -189,14 +191,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     timeWindow,
     keyGenerator: () => "authenticated-profile-api",
   });
-  const publicDemoWindow = options.publicDemoRateLimitWindow ?? "1 hour";
+  const publicDemoWindow = options.publicDemoRateLimitWindow ?? "1 minute";
   const publicDemoPerClientLimit = app.createRateLimit({
-    max: options.publicDemoPerClientRateLimitMax ?? 6,
+    max: options.publicDemoPerClientRateLimitMax ?? 120,
     timeWindow: publicDemoWindow,
     keyGenerator: anonymousClientKey,
   });
   const publicDemoGlobalLimit = app.createRateLimit({
-    max: options.publicDemoGlobalRateLimitMax ?? 20,
+    max: options.publicDemoGlobalRateLimitMax ?? 180,
     timeWindow: publicDemoWindow,
     keyGenerator: () => "public-demo-global",
   });
@@ -232,10 +234,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         ...(options.publicDemoExpiresAt !== undefined
           ? { expiresAt: new Date(options.publicDemoExpiresAt).toISOString() }
           : {}),
-        perClientMax: options.publicDemoPerClientRateLimitMax ?? 6,
-        globalMax: options.publicDemoGlobalRateLimitMax ?? 20,
+        perClientMax: options.publicDemoPerClientRateLimitMax ?? 120,
+        globalMax: options.publicDemoGlobalRateLimitMax ?? 180,
         timeWindow: publicDemoWindow,
-        maxColdExtractions: options.publicDemoMaxColdExtractions ?? 50,
+        maxColdExtractions: options.publicDemoMaxColdExtractions ?? 100,
+        maxQueuedDistinctProfiles: options.maxQueuedDistinctProfiles ?? 4,
       };
   const openApiDocument = buildOpenApiDocument(accessDescription);
   const apiDocumentationHtml = buildApiDocumentationHtml(accessDescription);
@@ -350,6 +353,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           error: "public_demo_budget_exhausted",
           message: error.message,
         });
+      }
+      if (error instanceof ProviderBusyError) {
+        return reply
+          .header("retry-after", 5)
+          .code(429)
+          .send({
+            error: "provider_busy",
+            message: `${error.message}; retry shortly`,
+          });
       }
       if (error instanceof ProviderAuthenticationError) {
         return reply.code(502).send({ error: "provider_authentication_failed", message: error.message });

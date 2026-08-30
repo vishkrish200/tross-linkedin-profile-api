@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { CacheProvider } from "../src/provider/cache-provider.js";
 import { ColdExtractionBudgetProvider } from "../src/provider/cold-extraction-budget-provider.js";
-import { ProviderQuotaExceededError, type ProfileProvider } from "../src/provider/profile-provider.js";
+import { ConcurrencyProvider } from "../src/provider/concurrency-provider.js";
+import {
+  ProviderBusyError,
+  ProviderQuotaExceededError,
+  type ProfileProvider,
+} from "../src/provider/profile-provider.js";
 
 const profile = (sourceUrl: string) => ({
   sourceUrl,
@@ -49,5 +54,34 @@ describe("ColdExtractionBudgetProvider", () => {
   it("rejects invalid budgets", () => {
     const inner: ProfileProvider = { fetch: async (url) => profile(url) };
     expect(() => new ColdExtractionBudgetProvider(inner, 0)).toThrow(RangeError);
+  });
+
+  it("does not spend cold-extraction credits on rejected queue overflow", async () => {
+    const completions: Array<() => void> = [];
+    const inner: ProfileProvider = {
+      fetch: vi.fn((url: string) => new Promise<ReturnType<typeof profile>>((resolve) => {
+        completions.push(() => resolve(profile(url)));
+      })),
+    };
+    const budgeted = new ColdExtractionBudgetProvider(inner, 5);
+    const limited = new ConcurrencyProvider(budgeted, 1, 4);
+    const provider = new CacheProvider(limited, 60_000);
+    const requests = Array.from({ length: 100 }, (_, index) =>
+      provider.fetch(`https://www.linkedin.com/in/burst-${index}/`).then(
+        () => "fulfilled" as const,
+        (error: unknown) => error,
+      ));
+
+    for (let index = 0; index < 5; index += 1) {
+      await vi.waitFor(() => expect(completions).toHaveLength(1));
+      completions.shift()?.();
+    }
+
+    const results = await Promise.all(requests);
+    expect(results.filter((result) => result === "fulfilled")).toHaveLength(5);
+    expect(results.filter((result) => result instanceof ProviderBusyError)).toHaveLength(95);
+    await expect(provider.fetch("https://www.linkedin.com/in/after-budget/"))
+      .rejects.toBeInstanceOf(ProviderQuotaExceededError);
+    expect(inner.fetch).toHaveBeenCalledTimes(5);
   });
 });

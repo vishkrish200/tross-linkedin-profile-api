@@ -27,11 +27,11 @@ describe("CacheProvider", () => {
     const cache = new CacheProvider(inner, 60_000);
     const url = "https://www.linkedin.com/in/example/";
 
-    const requests = Array.from({ length: 10 }, () => cache.fetch(url));
+    const requests = Array.from({ length: 100 }, () => cache.fetch(url));
     expect(inner.fetch).toHaveBeenCalledTimes(1);
     complete(profile(url));
 
-    await expect(Promise.all(requests)).resolves.toHaveLength(10);
+    await expect(Promise.all(requests)).resolves.toHaveLength(100);
     await cache.fetch(url);
     expect(inner.fetch).toHaveBeenCalledTimes(1);
   });

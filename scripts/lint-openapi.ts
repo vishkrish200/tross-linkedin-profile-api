@@ -15,10 +15,11 @@ const specifications = [
     document: buildOpenApiDocument({
       mode: "public-demo",
       expiresAt: "2099-12-31T23:59:59.000Z",
-      perClientMax: 6,
-      globalMax: 20,
-      timeWindow: "1 hour",
-      maxColdExtractions: 50,
+      perClientMax: 120,
+      globalMax: 180,
+      timeWindow: "1 minute",
+      maxColdExtractions: 100,
+      maxQueuedDistinctProfiles: 4,
     }),
   },
 ];

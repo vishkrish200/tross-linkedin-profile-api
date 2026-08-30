@@ -27,22 +27,23 @@ const protectedProvider = new CircuitBreakerProvider(
   linkedinProvider,
   config.linkedinBreakerCooldownMs,
 );
+const budgetedProvider = config.accessMode === "public-demo"
+  ? new ColdExtractionBudgetProvider(
+      protectedProvider,
+      config.publicDemoMaxColdExtractions,
+    )
+  : protectedProvider;
 const concurrentProvider = new ConcurrencyProvider(
-  protectedProvider,
+  budgetedProvider,
   config.linkedinMaxConcurrency,
+  config.linkedinMaxQueueSize,
 );
 const upstreamProvider = new DeadlineProvider(
   concurrentProvider,
   config.linkedinExtractionTimeoutMs,
 );
-const budgetedProvider = config.accessMode === "public-demo"
-  ? new ColdExtractionBudgetProvider(
-      upstreamProvider,
-      config.publicDemoMaxColdExtractions,
-    )
-  : upstreamProvider;
 const provider = new CacheProvider(
-  budgetedProvider,
+  upstreamProvider,
   config.cacheTtlMs,
   Date.now,
   config.cacheMaxEntries,
@@ -67,6 +68,7 @@ const app = await buildApp({
   publicDemoGlobalRateLimitMax: config.publicDemoGlobalRateLimitMax,
   publicDemoRateLimitWindow: config.publicDemoRateLimitWindow,
   publicDemoMaxColdExtractions: config.publicDemoMaxColdExtractions,
+  maxQueuedDistinctProfiles: config.linkedinMaxQueueSize,
   revision: process.env.K_REVISION ?? process.env.GIT_SHA ?? "local",
 });
 

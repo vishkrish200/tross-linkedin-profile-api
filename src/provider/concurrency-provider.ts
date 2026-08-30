@@ -1,5 +1,9 @@
 import type { Profile } from "../domain/profile.js";
-import type { ProfileFetchOptions, ProfileProvider } from "./profile-provider.js";
+import {
+  ProviderBusyError,
+  type ProfileFetchOptions,
+  type ProfileProvider,
+} from "./profile-provider.js";
 
 type Waiter = {
   resolve: () => void;
@@ -15,9 +19,13 @@ export class ConcurrencyProvider implements ProfileProvider {
   constructor(
     private readonly inner: ProfileProvider,
     private readonly limit: number,
+    private readonly maxQueueSize = Number.MAX_SAFE_INTEGER,
   ) {
     if (!Number.isInteger(limit) || limit < 1) {
       throw new RangeError("Concurrency limit must be a positive integer");
+    }
+    if (!Number.isInteger(maxQueueSize) || maxQueueSize < 0) {
+      throw new RangeError("Queue size must be a non-negative integer");
     }
   }
 
@@ -35,6 +43,9 @@ export class ConcurrencyProvider implements ProfileProvider {
     if (this.active < this.limit) {
       this.active += 1;
       return;
+    }
+    if (this.waiters.length >= this.maxQueueSize) {
+      throw new ProviderBusyError();
     }
     await new Promise<void>((resolve, reject) => {
       const waiter: Waiter = { resolve, reject, ...(signal ? { signal } : {}) };

@@ -2,6 +2,7 @@ import { setImmediate } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import type { Profile } from "../src/domain/profile.js";
 import { ConcurrencyProvider } from "../src/provider/concurrency-provider.js";
+import { ProviderBusyError } from "../src/provider/profile-provider.js";
 
 function profile(sourceUrl: string): Profile {
   return {
@@ -72,6 +73,61 @@ describe("ConcurrencyProvider", () => {
     const inner = { fetch: vi.fn() };
     expect(() => new ConcurrencyProvider(inner, 0)).toThrow(RangeError);
     expect(() => new ConcurrencyProvider(inner, 1.5)).toThrow(RangeError);
+    expect(() => new ConcurrencyProvider(inner, 1, -1)).toThrow(RangeError);
+  });
+
+  it("bounds the distinct-profile queue and releases capacity in FIFO order", async () => {
+    const completions: Array<() => void> = [];
+    const inner = {
+      fetch: vi.fn((url: string) => new Promise<Profile>((resolve) => {
+        completions.push(() => resolve(profile(url)));
+      })),
+    };
+    const limited = new ConcurrencyProvider(inner, 1, 2);
+    const first = limited.fetch("https://www.linkedin.com/in/first/");
+    const second = limited.fetch("https://www.linkedin.com/in/second/");
+    const third = limited.fetch("https://www.linkedin.com/in/third/");
+
+    await expect(limited.fetch("https://www.linkedin.com/in/overflow/"))
+      .rejects.toBeInstanceOf(ProviderBusyError);
+    expect(inner.fetch).toHaveBeenCalledTimes(1);
+
+    completions.shift()?.();
+    await setImmediate();
+    expect(inner.fetch).toHaveBeenCalledTimes(2);
+    completions.shift()?.();
+    await setImmediate();
+    expect(inner.fetch).toHaveBeenCalledTimes(3);
+    completions.shift()?.();
+    await expect(Promise.all([first, second, third])).resolves.toHaveLength(3);
+  });
+
+  it("admits only active plus queued capacity from a 100-profile burst", async () => {
+    const completions: Array<() => void> = [];
+    const inner = {
+      fetch: vi.fn((url: string) => new Promise<Profile>((resolve) => {
+        completions.push(() => resolve(profile(url)));
+      })),
+    };
+    const limited = new ConcurrencyProvider(inner, 1, 4);
+    const requests = Array.from({ length: 100 }, (_, index) =>
+      limited.fetch(`https://www.linkedin.com/in/burst-${index}/`).then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason: unknown) => ({ status: "rejected" as const, reason }),
+      ));
+
+    for (let index = 0; index < 5; index += 1) {
+      await setImmediate();
+      expect(completions).toHaveLength(1);
+      completions.shift()?.();
+    }
+
+    const results = await Promise.all(requests);
+    expect(inner.fetch).toHaveBeenCalledTimes(5);
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(5);
+    const rejected = results.filter((result) => result.status === "rejected");
+    expect(rejected).toHaveLength(95);
+    expect(rejected.every(({ reason }) => reason instanceof ProviderBusyError)).toBe(true);
   });
 
   it("removes an aborted waiter without consuming a slot", async () => {

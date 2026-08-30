@@ -28,9 +28,11 @@ describe("runtime configuration", () => {
     expect(publicDemo.apiKey).toBeUndefined();
     expect(publicDemo.accessMode).toBe("public-demo");
     expect(publicDemo.publicDemoExpiresAt).toBe(Date.parse("2026-09-08T18:29:59Z"));
-    expect(publicDemo.publicDemoPerClientRateLimitMax).toBe(6);
-    expect(publicDemo.publicDemoGlobalRateLimitMax).toBe(20);
-    expect(publicDemo.publicDemoMaxColdExtractions).toBe(50);
+    expect(publicDemo.publicDemoPerClientRateLimitMax).toBe(120);
+    expect(publicDemo.publicDemoGlobalRateLimitMax).toBe(180);
+    expect(publicDemo.publicDemoRateLimitWindow).toBe("1 minute");
+    expect(publicDemo.publicDemoMaxColdExtractions).toBe(100);
+    expect(publicDemo.linkedinMaxQueueSize).toBe(4);
 
     expect(() => loadConfig({
       NODE_ENV: "production",
@@ -82,6 +84,7 @@ describe("runtime configuration", () => {
     ["CACHE_TTL_SECONDS", "-1"],
     ["CACHE_MAX_ENTRIES", "not-a-number"],
     ["LINKEDIN_MAX_CONCURRENCY", "0"],
+    ["LINKEDIN_MAX_QUEUE_SIZE", "-1"],
     ["LINKEDIN_REQUEST_TIMEOUT_MS", "1.5"],
     ["LINKEDIN_MAX_RESPONSE_BYTES", "1024"],
   ])("rejects an invalid configured value: %s=%s", (name, value) => {

@@ -8,9 +8,9 @@ HTTP request
   -> bearer quota or public per-client plus global quotas
   -> LinkedIn URL validation and canonicalization
   -> short-lived cache and same-profile request coalescing
-  -> public-demo cold-extraction budget on cache misses
   -> one overall extraction deadline
-  -> upstream concurrency limit
+  -> bounded upstream concurrency queue
+  -> public-demo cold-extraction budget when a miss starts
   -> authentication/challenge circuit breaker
   -> shared upstream request pacing
   -> direct LinkedIn profile-page request
@@ -41,9 +41,9 @@ HTTP request
 
 - Successful results are cached briefly, and simultaneous misses for the same profile share one upstream request.
 - The cache is bounded with LRU eviction, opportunistic expiry cleanup, and a zero-cache mode.
-- Distinct uncached profile extractions are limited to two at a time by default.
+- Distinct uncached profile extractions are limited to two at a time by default. Only a bounded number may wait in FIFO order; overflow fails immediately with retryable `429 provider_busy` instead of creating an unbounded backlog.
 - Bearer mode is the production default. A current and previous token can overlap during a bounded rotation window; comparison uses fixed-size digests and constant-time equality.
-- `public-demo` must be selected explicitly and requires an expiry timestamp. It applies a hashed per-client fairness bucket, one global bucket, and a cold-extraction budget inside the cache so warm hits do not spend LinkedIn-account budget. The global bucket is the security boundary because caller network headers are not identity.
+- `public-demo` must be selected explicitly and requires an expiry timestamp. It applies bounded hashed per-client and global ingress buckets plus a separate cold-extraction budget inside the cache so warm hits do not spend LinkedIn-account budget. The global bucket is the security boundary because caller network headers are not identity.
 - Unauthorized bearer requests have a separate quota, and health checks do not consume profile quotas.
 - Profile requests have a small body limit and return `Cache-Control: no-store`.
 - Session cookies and CSRF values exist only in runtime configuration.
@@ -54,6 +54,10 @@ HTTP request
 - Every zero-item pagination response requires the known empty marker. Declared-item/parser-count discrepancies, repeated pages, and changed later-page shapes fail closed.
 - Section pagination is capped at five requests and every public section array is hard-capped at 50 entries. A full fifth page or upstream page-size over-delivery returns a warning that the result may be truncated.
 - Client disconnect and service shutdown signals propagate cancellation through cache coalescing, queue waits, and active fetches.
+
+### Burst behavior
+
+A burst is not mapped one-for-one to LinkedIn. Cached requests return without upstream work, concurrent requests for the same canonical profile share one extraction, and a small FIFO queue admits distinct misses up to its configured bound. Further distinct misses receive `429 provider_busy` with `Retry-After`. Active extractions still pass through the independent LinkedIn request limiter and circuit breaker, so API ingress capacity never raises upstream concurrency or pacing.
 
 ## Deliberate omissions
 
