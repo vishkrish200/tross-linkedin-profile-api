@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const PROFILE_SECTION_ITEM_LIMIT = 50;
+export const PROFILE_IMAGE_LIMIT = 50;
 
 const optionalText = z.string().trim().min(1).optional();
 
@@ -46,7 +47,7 @@ export const profileSchema = z.object({
   skills: z.array(z.string().trim().min(1)).max(PROFILE_SECTION_ITEM_LIMIT),
   certifications: z.array(certificationSchema).max(PROFILE_SECTION_ITEM_LIMIT),
   languages: z.array(languageSchema).max(PROFILE_SECTION_ITEM_LIMIT),
-  profileImages: z.array(z.url()),
+  profileImages: z.array(z.url()).max(PROFILE_IMAGE_LIMIT),
   warnings: z.array(z.string()),
 });
 

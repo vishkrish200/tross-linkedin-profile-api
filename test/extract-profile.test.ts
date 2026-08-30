@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PROFILE_IMAGE_LIMIT } from "../src/domain/profile.js";
 import {
   countSectionItems,
   extractAboutComponentRequest,
@@ -11,6 +12,7 @@ import {
   isKnownEmptyAboutComponent,
 } from "../src/provider/extract-profile.js";
 import {
+  adjacentSectionLabelAboutComponentFlight,
   certificationsFlight,
   boundaryWordAboutComponentFlight,
   careerBreakExperienceFlight,
@@ -22,6 +24,7 @@ import {
   emptyChildrenAboutComponentFlight,
   explicitlyEmptyAboutComponentFlight,
   experienceFlight,
+  fallbackCredentialFlight,
   framedImageProfileHtml,
   groupedExperienceFlight,
   internationalAboutComponentFlight,
@@ -33,6 +36,7 @@ import {
   liveShapedEducationWithoutDatesFlight,
   liveShapedLanguagesFlight,
   liveShapedProfileHtml,
+  markerOnlyCertificationFlight,
   multiParagraphAboutComponentFlight,
   multipleDegreesEducationFlight,
   partialImageProfileHtml,
@@ -60,6 +64,13 @@ describe("LinkedIn React Flight extraction", () => {
       about: "I build reliable products and evaluation systems for agentic software.",
       profileImages: ["https://media.example.test/profile-displayphoto-scale_400_400/example.jpg"],
     });
+  });
+
+  it("decodes HTML entities in the document-title name fallback", () => {
+    const encoded = profileHtml
+      .replace("<title>Vishnu Example", "<title>Vishnu &amp; Example &#x1F680;")
+      .replace("Vishnu Example</title>", "Vishnu &amp; Example &#x1F680;</title>");
+    expect(extractIdentity(encoded).name).toBe("Vishnu & Example 🚀");
   });
 
   it("extracts identity and complete image renditions from the current composite header shape", () => {
@@ -130,6 +141,16 @@ describe("LinkedIn React Flight extraction", () => {
     );
   });
 
+  it("preserves authoritative About text that mentions LinkedIn product names", () => {
+    const productFocusedAbout = lazyAboutComponentFlight.replace(
+      "I build dependable systems and test them with carefully designed, reproducible evaluations.",
+      "I build Marketing Solutions and Talent Solutions for privacy-conscious teams.",
+    );
+    expect(extractIdentity(lazyAboutProfileHtml, [productFocusedAbout]).about).toBe(
+      "I build Marketing Solutions and Talent Solutions for privacy-conscious teams.",
+    );
+  });
+
   it("uses initialContent when a lazy card advertises empty children", () => {
     expect(extractIdentity(lazyAboutProfileHtml, [emptyChildrenAboutComponentFlight]).about).toBe(
       "A dedicated initial-content biography remains authoritative when children is empty.",
@@ -153,6 +174,13 @@ describe("LinkedIn React Flight extraction", () => {
       .toBe(false);
   });
 
+  it("does not mistake an adjacent section label for About text", () => {
+    expect(extractIdentity(
+      lazyAboutProfileHtml,
+      [adjacentSectionLabelAboutComponentFlight],
+    ).about).toBeUndefined();
+  });
+
   it("rejects non-HTTPS structured image candidates", () => {
     expect(extractIdentity(unsafeImageProfileHtml).profileImages).toEqual([]);
   });
@@ -161,6 +189,31 @@ describe("LinkedIn React Flight extraction", () => {
     expect(extractIdentity(partialImageProfileHtml).profileImages).toEqual([
       "https://media.example.test/profile-displayphoto-shrink_400_400/valid.jpg",
     ]);
+  });
+
+  it("caps structured profile-image output at the public schema limit", () => {
+    const imageRenditions = Array.from({ length: PROFILE_IMAGE_LIMIT + 10 }, (_, index) => ({
+      width: index + 1,
+      suffixUrl: `${index + 1}_${index + 1}/image-${index}.jpg`,
+    }));
+    const stream = `0:${JSON.stringify(["$", "main", null, { children: [{
+      source: {
+        renderPayload: {
+          rootUrl: "https://media.example.test/profile-displayphoto-shrink_",
+          imageRenditions,
+        },
+      },
+    }] }])}\n1:${JSON.stringify({ payload: {
+      vanityName: "many-images",
+      profileId: "profile-many-images",
+    } })}`;
+    const html = [
+      "<!doctype html><html><head><title>Many Images | LinkedIn</title></head><body>",
+      `<script id="rehydrate-data">window.__como_rehydration__ = ${JSON.stringify([stream])};</script>`,
+      "</body></html>",
+    ].join("");
+
+    expect(extractIdentity(html).profileImages).toHaveLength(PROFILE_IMAGE_LIMIT);
   });
 
   it("distinguishes a changed lazy-card contract from a layout without that wrapper", () => {
@@ -260,6 +313,38 @@ describe("LinkedIn React Flight extraction", () => {
     expect(profile.certifications.map((item) => item.credentialId)).toEqual([
       "RENEWAL-ONE",
       "RENEWAL-TWO",
+    ]);
+  });
+
+  it("joins certification links by collection identity rather than array position", () => {
+    expect(extractCertifications(markerOnlyCertificationFlight)).toEqual([
+      {
+        name: "Machine Learning Associate",
+        issuer: "Example Cloud",
+        issued: "Nov 2024",
+        credentialUrl: "https://credentials.example.test/cert/one",
+      },
+      {
+        name: "Systems Professional",
+        issuer: "Example Cloud",
+        issued: "Jan 2026",
+        credentialUrl: "https://credentials.example.test/cert/three",
+      },
+    ]);
+  });
+
+  it("omits a credential URL when only a positional fallback is available", () => {
+    expect(extractCertifications(fallbackCredentialFlight)).toEqual([
+      {
+        name: "First Certificate",
+        issuer: "Example Issuer",
+        issued: "Jan 2025",
+      },
+      {
+        name: "Second Certificate",
+        issuer: "Example Issuer",
+        issued: "Jan 2026",
+      },
     ]);
   });
 

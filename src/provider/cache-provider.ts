@@ -32,6 +32,7 @@ export class CacheProvider implements ProfileProvider {
   }
 
   async fetch(profileUrl: string, options: ProfileFetchOptions = {}): Promise<Profile> {
+    if (options.signal?.aborted) throw options.signal.reason;
     const now = this.now();
     this.pruneExpired(now);
     const cached = this.entries.get(profileUrl);
@@ -43,7 +44,7 @@ export class CacheProvider implements ProfileProvider {
     }
 
     const pending = this.inFlight.get(profileUrl);
-    if (pending) return this.consume(pending, options.signal);
+    if (pending) return this.consume(profileUrl, pending, options.signal);
 
     const controller = new AbortController();
     const entry: InFlightEntry = {
@@ -76,14 +77,18 @@ export class CacheProvider implements ProfileProvider {
       })
       .finally(() => {
         entry.settled = true;
-        this.inFlight.delete(profileUrl);
+        if (this.inFlight.get(profileUrl) === entry) this.inFlight.delete(profileUrl);
       });
     entry.promise = request;
     this.inFlight.set(profileUrl, entry);
-    return this.consume(entry, options.signal);
+    return this.consume(profileUrl, entry, options.signal);
   }
 
-  private consume(entry: InFlightEntry, signal?: AbortSignal): Promise<Profile> {
+  private consume(
+    profileUrl: string,
+    entry: InFlightEntry,
+    signal?: AbortSignal,
+  ): Promise<Profile> {
     entry.consumers += 1;
     return new Promise<Profile>((resolve, reject) => {
       let released = false;
@@ -92,6 +97,7 @@ export class CacheProvider implements ProfileProvider {
         released = true;
         entry.consumers -= 1;
         if (entry.consumers === 0 && !entry.settled) {
+          if (this.inFlight.get(profileUrl) === entry) this.inFlight.delete(profileUrl);
           entry.controller.abort(new Error("All callers cancelled the shared extraction"));
         }
       };

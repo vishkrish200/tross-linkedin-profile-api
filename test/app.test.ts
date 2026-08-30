@@ -34,6 +34,7 @@ describe("profile API", () => {
 
     const discovery = await app.inject({ method: "GET", url: "/" });
     expect(discovery.statusCode).toBe(200);
+    expect(discovery.headers["x-content-type-options"]).toBe("nosniff");
     expect(discovery.json()).toMatchObject({
       status: "ok",
       revision: "test-revision",
@@ -313,6 +314,22 @@ describe("profile API", () => {
     await app.close();
   });
 
+  it.each(["bearer secret", "BEARER   secret"])(
+    "accepts the case-insensitive HTTP authentication scheme: %s",
+    async (authorization) => {
+      const app = await buildApp({ provider, apiKey: "secret" });
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/profiles",
+        headers: { authorization },
+        payload: { url: "https://www.linkedin.com/in/test-person/" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      await app.close();
+    },
+  );
+
   it("does not let unauthorized requests consume the authenticated quota", async () => {
     const app = await buildApp({
       provider,
@@ -460,6 +477,27 @@ describe("profile API", () => {
       payload: { url: "https://www.linkedin.com/in/%/" },
     });
     expect(response.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("treats malformed provider output as an upstream contract failure", async () => {
+    const invalidProvider = {
+      async fetch(sourceUrl: string) {
+        return { ...await provider.fetch(sourceUrl), fetchedAt: "not-an-iso-timestamp" };
+      },
+    } as unknown as ProfileProvider;
+    const app = await buildApp({ provider: invalidProvider });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/profiles",
+      payload: { url: "https://www.linkedin.com/in/test-person/" },
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toEqual({
+      error: "provider_fetch_failed",
+      message: "LinkedIn response did not satisfy the public profile contract",
+    });
     await app.close();
   });
 

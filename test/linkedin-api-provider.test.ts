@@ -257,7 +257,12 @@ describe("LinkedInApiProvider", () => {
     const provider = new LinkedInApiProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
-        new Response("<html><body>Security verification checkpoint/challenge</body></html>"),
+        new Response([
+          "<html><head><title>Security verification | LinkedIn</title></head><body>",
+          "<h1>Security verification</h1>",
+          '<form action="/checkpoint/challenge/"></form>',
+          "</body></html>",
+        ].join("")),
       ),
     });
     await expect(provider.fetch("https://www.linkedin.com/in/example/"))
@@ -268,7 +273,11 @@ describe("LinkedInApiProvider", () => {
     const provider = new LinkedInApiProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
-        htmlResponse("<html><head><title>Consent | LinkedIn</title></head><body></body></html>"),
+        htmlResponse([
+          "<html><head><title>Consent | LinkedIn</title></head><body>",
+          '<a href="https://consent.linkedin.com/"></a>',
+          "</body></html>",
+        ].join("")),
       ),
     });
     await expect(provider.fetch("https://www.linkedin.com/in/example/"))
@@ -294,6 +303,49 @@ describe("LinkedInApiProvider", () => {
 
     await expect(provider.fetch("https://www.linkedin.com/in/vishnu-example/"))
       .resolves.toMatchObject({ name: "Vishnu Example" });
+  });
+
+  it.each([
+    ["a name containing consent", "<title>Ana Consentino | LinkedIn</title>"],
+    ["a security-related headline", "<title>Bob - Security Verification Engineer | LinkedIn</title>"],
+    ["a title that is also a protection label", "<title>Consent | LinkedIn</title>"],
+  ])("does not classify %s as a protection page without structural evidence", async (_label, title) => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") {
+        return htmlResponse(profileHtml
+          .replace(/<title>[\s\S]*?<\/title>/, title)
+          .replace("</body>", "<p>authwall login__form checkpoint/challenge</p></body>"));
+      }
+      return rscResponse(emptyFlight);
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/vishnu-example/"))
+      .resolves.toMatchObject({ headline: "Software Engineer building agentic systems" });
+  });
+
+  it("does not treat ordinary RSC profile text containing authwall as an auth page", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/in/vishnu-example/") return htmlResponse(profileHtml);
+      const pagerId = url.searchParams.get("sduiid") ?? "";
+      return rscResponse(
+        pagerId.endsWith(".skills") ? skillsPageFlight("authwall", 1) : emptyFlight,
+      );
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl,
+      baseUrl: "https://linkedin.example.test",
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/vishnu-example/"))
+      .resolves.toMatchObject({ skills: ["authwall-1"] });
   });
 
   it("rejects an unexpected successful-response content type", async () => {
@@ -345,6 +397,44 @@ describe("LinkedInApiProvider", () => {
     });
     await expect(truncated.fetch("https://www.linkedin.com/in/example/"))
       .rejects.toThrow("truncated response body");
+  });
+
+  it("cancels an oversized response body before reading it", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      maxResponseBytes: 64,
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(htmlResponse(body, {
+        headers: { "content-length": "65" },
+      })),
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toThrow("exceeded the configured size limit");
+    expect(cancelled).toBe(true);
+  });
+
+  it("normalizes response-stream failures as provider fetch errors", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error("upstream stream reset"));
+      },
+    });
+    const provider = new LinkedInApiProvider({
+      cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(htmlResponse(body)),
+    });
+
+    await expect(provider.fetch("https://www.linkedin.com/in/example/"))
+      .rejects.toMatchObject({
+        name: "ProviderFetchError",
+        message: "upstream stream reset",
+      });
   });
 
   it("maps an upstream timeout to the non-retrying fetch error", async () => {

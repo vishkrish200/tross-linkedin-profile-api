@@ -181,6 +181,12 @@ export const lazyAboutComponentFlight = flight([
   ])],
 ]);
 
+export const adjacentSectionLabelAboutComponentFlight = flight([
+  ["0", itemElement(["About"])],
+  ["1", itemElement(["Top skills"])],
+  ["2", itemElement(["Systems Design"])],
+]);
+
 export const explicitlyEmptyAboutComponentFlight = flight([
   ["0", ["$", "div", null, {
     "data-sdui-component": "profile-cards",
@@ -506,6 +512,11 @@ function credentialLinkElement(target: string) {
   }];
 }
 
+function markerOnlyCredentialLinkElement(target: string) {
+  const link = credentialLinkElement(target) as [string, string, null, Record<string, unknown>];
+  return [link[0], link[1], link[2], { ...link[3], children: [] }];
+}
+
 export const unsafeCredentialFlight = flight([
   ["0", ["$", "div", null, { children: [
     ...[
@@ -555,6 +566,56 @@ export const liveShapedCertificationsFlight = flight([
   ["c", textElement("Generative AI Professional")],
   ["d", textElement("Example Cloud")],
   ["e", textElement("Issued Oct 2024")],
+]);
+
+// The middle entity is intentionally not a parsable certification, but it still
+// advertises a credential link. Positional joins used to shift that link onto
+// the following valid certification.
+export const markerOnlyCertificationFlight = flight([
+  ["0", ["$", "div", null, { children: [
+    ...[
+      "Licenses & certifications",
+      collectionMarker("one"),
+      "Machine Learning Associate",
+      "Example Cloud",
+      "Issued Nov 2024",
+    ].map(textElement),
+    credentialLinkElement("https://credentials.example.test/cert/one"),
+    ...[
+      collectionMarker("marker-only"),
+    ].map(textElement),
+    markerOnlyCredentialLinkElement("https://credentials.example.test/cert/marker-only"),
+    ...[
+      collectionMarker("three"),
+      "Systems Professional",
+      "Example Cloud",
+      "Issued Jan 2026",
+    ].map(textElement),
+    credentialLinkElement("https://credentials.example.test/cert/three"),
+  ] }]],
+]);
+
+// The collection marker is a raw object, so it is visible to URL traversal but
+// not rendered as semantic text. The fallback extractor must omit the URL
+// rather than guessing a positional association.
+export const fallbackCredentialFlight = flight([
+  ["0", ["$", "div", null, { children: [
+    {
+      key: "entity-collection-item-hidden",
+      semanticId: "entity-collection-item-hidden",
+    },
+    credentialLinkElement("https://credentials.example.test/cert/hidden"),
+  ] }]],
+  ["4", itemElement([
+    "First Certificate",
+    "Example Issuer",
+    "Issued Jan 2025",
+  ])],
+  ["5", itemElement([
+    "Second Certificate",
+    "Example Issuer",
+    "Issued Jan 2026",
+  ])],
 ]);
 
 export const liveShapedEducationWithoutDatesFlight = flight([

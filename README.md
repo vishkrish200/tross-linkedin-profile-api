@@ -83,7 +83,7 @@ Only HTTPS URLs on `linkedin.com` or `www.linkedin.com` whose path is exactly `/
 
 - Optional scalar fields are omitted when they are not visible; collection fields are always arrays.
 - Date ranges remain the authorized session's human-readable LinkedIn values. The service does not invent precise normalized dates from partial or locale-sensitive text.
-- `warnings` carries explicit completeness signals, including the intentional 50-item section cap.
+- `warnings` carries explicit completeness signals, including the intentional 50-item section cap. Profile-image output is independently capped at 50 URLs.
 - Provider/authentication failures are distinct from malformed caller input so consumers do not mistake upstream drift for a valid empty profile.
 
 ## How the direct provider works
@@ -196,7 +196,7 @@ The reference deployment runs on Google Cloud Run with the LinkedIn session and 
 - A section returns at most 50 entries because upstream pagination and the public schema are intentionally bounded. A full fifth page or upstream page-size over-delivery adds a `possibly truncated` warning.
 - Synthetic React Flight fixtures prove deterministic parsing; the dated live smoke test is the separate compatibility check.
 
-For component responsibilities, see [`docs/architecture.md`](docs/architecture.md). The privacy-minimized live evidence is in [`docs/acceptance.md`](docs/acceptance.md). The hardening controls, adversarial test catalog, and residual risks are in [`docs/hardening.md`](docs/hardening.md). The delivery checklist is in [`docs/challenge-notes.md`](docs/challenge-notes.md).
+For component responsibilities, see [`docs/architecture.md`](docs/architecture.md). The privacy-minimized live evidence is in [`docs/acceptance.md`](docs/acceptance.md). The hardening controls, adversarial test catalog, and residual risks are in [`docs/hardening.md`](docs/hardening.md). The balanced-modularity and full-review decisions are in [`docs/code-review-2026-08-31.md`](docs/code-review-2026-08-31.md). The delivery checklist is in [`docs/challenge-notes.md`](docs/challenge-notes.md).
 
 ## Repository hygiene
 

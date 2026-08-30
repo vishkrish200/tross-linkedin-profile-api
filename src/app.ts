@@ -6,7 +6,6 @@ import Fastify, {
   type FastifyServerOptions,
 } from "fastify";
 import rateLimit from "@fastify/rate-limit";
-import { ZodError } from "zod";
 import {
   buildApiDocumentationHtml,
   buildOpenApiDocument,
@@ -48,10 +47,11 @@ function tokenDigest(value: string): Buffer {
 }
 
 function validBearerToken(authorization: string | undefined, apiKeys: readonly string[]): boolean {
-  const supplied = tokenDigest(authorization ?? "");
+  const credential = /^Bearer +(.+)$/i.exec(authorization ?? "")?.[1] ?? "";
+  const supplied = tokenDigest(credential);
   let matches = 0;
   for (const apiKey of apiKeys) {
-    matches |= Number(timingSafeEqual(supplied, tokenDigest(`Bearer ${apiKey}`)));
+    matches |= Number(timingSafeEqual(supplied, tokenDigest(apiKey)));
   }
   return matches === 1;
 }
@@ -244,9 +244,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const apiDocumentationHtml = buildApiDocumentationHtml(accessDescription);
 
   app.addHook("onRequest", async (request, reply) => {
+    reply.header("x-content-type-options", "nosniff");
     if (request.url.startsWith("/v1/profiles")) {
       reply.header("cache-control", "no-store");
-      reply.header("x-content-type-options", "nosniff");
     }
   });
 
@@ -322,6 +322,23 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       ? authenticatedLimit
       : enforcePublicDemoLimits,
   }, async (request, reply) => {
+    const parsedBody = profileRequestSchema.safeParse(request.body);
+    if (!parsedBody.success) {
+      return reply.code(400).send({
+        error: "invalid_request",
+        message: "Expected JSON body: { url: string }",
+      });
+    }
+    let profileUrl: string;
+    try {
+      profileUrl = normalizeLinkedInProfileUrl(parsedBody.data.url);
+    } catch (error) {
+      if (error instanceof InvalidLinkedInProfileUrlError) {
+        return reply.code(400).send({ error: "invalid_request", message: error.message });
+      }
+      throw error;
+    }
+
     const requestController = new AbortController();
     const cancel = () => requestController.abort(new ProviderFetchError("Client disconnected"));
     const cancelOnClose = () => {
@@ -332,19 +349,17 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     reply.raw.once("close", cancelOnClose);
 
     try {
-      const body = profileRequestSchema.parse(request.body);
-      const profileUrl = normalizeLinkedInProfileUrl(body.url);
-      const profile = profileSchema.parse(await options.provider.fetch(profileUrl, {
+      const result = profileSchema.safeParse(await options.provider.fetch(profileUrl, {
         signal: requestController.signal,
       }));
-      return reply.code(200).send({ data: profile });
-    } catch (error) {
-      if (error instanceof ZodError || error instanceof InvalidLinkedInProfileUrlError) {
-        return reply.code(400).send({
-          error: "invalid_request",
-          message: error instanceof InvalidLinkedInProfileUrlError ? error.message : "Expected JSON body: { url: string }",
-        });
+      if (!result.success) {
+        request.log.error({
+          issues: result.error.issues.map(({ code, path }) => ({ code, path })),
+        }, "Profile provider violated the public response contract");
+        throw new ProviderFetchError("LinkedIn response did not satisfy the public profile contract");
       }
+      return reply.code(200).send({ data: result.data });
+    } catch (error) {
       if (error instanceof ProviderNotConfiguredError) {
         return reply.code(503).send({ error: "provider_not_configured", message: error.message });
       }

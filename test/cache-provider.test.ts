@@ -169,4 +169,53 @@ describe("CacheProvider", () => {
     await expect(second).rejects.toThrow("second left");
     expect(upstreamSignal.aborted).toBe(true);
   });
+
+  it("rejects an already-aborted caller before starting shared work", async () => {
+    const inner = { fetch: vi.fn(async (url: string) => profile(url)) };
+    const cache = new CacheProvider(inner, 60_000);
+    const controller = new AbortController();
+    const reason = new Error("caller already left");
+    controller.abort(reason);
+
+    await expect(cache.fetch("https://www.linkedin.com/in/already-left/", {
+      signal: controller.signal,
+    })).rejects.toBe(reason);
+    expect(inner.fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not attach a fresh caller to shared work abandoned by its last consumer", async () => {
+    let rejectAbandoned!: () => void;
+    let completeSuccessor!: (value: Profile) => void;
+    const url = "https://www.linkedin.com/in/replacement/";
+    const inner = {
+      fetch: vi.fn((_url: string, options = {}) => {
+        const signal = (options as { signal: AbortSignal }).signal;
+        if (inner.fetch.mock.calls.length === 1) {
+          return new Promise<Profile>((_resolve, reject) => {
+            signal.addEventListener("abort", () => {
+              rejectAbandoned = () => reject(signal.reason);
+            }, { once: true });
+          });
+        }
+        return new Promise<Profile>((resolve) => {
+          completeSuccessor = resolve;
+        });
+      }),
+    };
+    const cache = new CacheProvider(inner, 60_000);
+    const firstController = new AbortController();
+    const first = cache.fetch(url, { signal: firstController.signal });
+    await vi.waitFor(() => expect(inner.fetch).toHaveBeenCalledTimes(1));
+    firstController.abort(new Error("first caller left"));
+    await expect(first).rejects.toThrow("first caller left");
+
+    const second = cache.fetch(url);
+    await vi.waitFor(() => expect(inner.fetch).toHaveBeenCalledTimes(2));
+    rejectAbandoned();
+    await Promise.resolve();
+    const third = cache.fetch(url);
+    expect(inner.fetch).toHaveBeenCalledTimes(2);
+    completeSuccessor(profile(url));
+    await expect(Promise.all([second, third])).resolves.toEqual([profile(url), profile(url)]);
+  });
 });

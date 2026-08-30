@@ -10,8 +10,8 @@ HTTP request
   -> short-lived cache and same-profile request coalescing
   -> one overall extraction deadline
   -> bounded upstream concurrency queue
-  -> public-demo cold-extraction budget when a miss starts
   -> authentication/challenge circuit breaker
+  -> public-demo cold-extraction budget when a LinkedIn attempt starts
   -> shared upstream request pacing
   -> direct LinkedIn profile-page request
   -> direct RSC lazy profile-card component request
@@ -35,7 +35,7 @@ HTTP request
 
 `src/provider/linkedin-api-provider.ts` fetches the validated profile page, follows LinkedIn's advertised lazy profile-card component contract for About-capable cards, and then calls the private RSC pagination endpoint for each supported section. Endpoints are constructed only from the validated public identifier, component identifiers in LinkedIn's response, and the transient profile identifier returned in the same response. Session values come only from runtime configuration.
 
-`src/provider/extract-profile.ts` is a pure parser. It reads the `rehydrate-data` React Flight stream, resolves row references and lazy component request metadata, collects semantic text from rendered component content, and maps section entries into the stable domain schema. Sanitized synthetic Flight fixtures cover this boundary without contacting LinkedIn.
+The parser boundary is split by responsibility without exposing extra public abstractions. `src/provider/react-flight.ts` owns bounded Flight row parsing, reference traversal, and semantic text collection. `src/provider/extract-profile-sections.ts` maps section rows into domain entries. `src/provider/extract-profile.ts` remains the stable facade for identity/About extraction, lazy-card metadata, result assembly, limits, and warnings. Sanitized synthetic Flight fixtures cover all three without contacting LinkedIn.
 
 ### Operational controls
 
@@ -43,12 +43,12 @@ HTTP request
 - The cache is bounded with LRU eviction, opportunistic expiry cleanup, and a zero-cache mode.
 - Distinct uncached profile extractions are limited to two at a time by default. Only a bounded number may wait in FIFO order; overflow fails immediately with retryable `429 provider_busy` instead of creating an unbounded backlog.
 - Bearer mode is the production default. A current and previous token can overlap during a bounded rotation window; comparison uses fixed-size digests and constant-time equality.
-- `public-demo` must be selected explicitly and requires an expiry timestamp. It applies bounded hashed per-client and global ingress buckets plus a separate cold-extraction budget inside the cache so warm hits do not spend LinkedIn-account budget. The global bucket is the security boundary because caller network headers are not identity.
+- `public-demo` must be selected explicitly and requires an expiry timestamp. It applies bounded hashed per-client and global ingress buckets plus a separate cold-extraction budget inside both the cache and circuit breaker, so warm hits and open-circuit rejections do not spend LinkedIn-account budget. The global bucket is the security boundary because caller network headers are not identity.
 - Unauthorized bearer requests have a separate quota, and health checks do not consume profile quotas.
-- Profile requests have a small body limit and return `Cache-Control: no-store`.
+- Profile requests have a small body limit and return `Cache-Control: no-store`; every route returns `X-Content-Type-Options: nosniff`.
 - Session cookies and CSRF values exist only in runtime configuration.
 - Authorization headers, cookies, request bodies, and response bodies are redacted from structured logs.
-- Every extraction has one overall deadline, including queue time. Individual fetches also have a timeout, response-size bound, MIME check, UTF-8 validation, and truncated-body check.
+- Every extraction has one overall deadline, including queue time. Individual fetches also have a timeout, response-size bound, MIME check, UTF-8 validation, and truncated-body check. Oversized bodies are cancelled immediately and body-stream failures remain normalized provider errors.
 - A process-wide breaker opens on 401/403, login redirects, checkpoints, consent walls, CAPTCHAs, and 429/999 responses. It aborts peer work, blocks queued network calls, and closes only after its cooldown.
 - Direct LinkedIn requests pass through one process-wide rolling-window limiter with minimum spacing. They are never automatically retried.
 - Every zero-item pagination response requires the known empty marker. Declared-item/parser-count discrepancies, repeated pages, and changed later-page shapes fail closed.

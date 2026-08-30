@@ -46,12 +46,20 @@ function isKnownEmptySectionResponse(content: string): boolean {
 }
 
 function assertNoProtectionPage(content: string): void {
-  if (/<title[^>]*>\s*(?:Sign in|Log in)[^<]*LinkedIn|authwall|login__form/i.test(content)) {
+  const isHtmlDocument = /<!doctype\s+html|<html\b|<body\b|<form\b/i.test(content);
+  if (!isHtmlDocument) return;
+
+  const loginForm = /<form\b[^>]*(?:id|class)=["'][^"']*\blogin__form\b[^"']*["']/i.test(content);
+  const authwallLink = /<(?:a|form)\b[^>]*(?:href|action)=["'][^"']*\/authwall(?:[/?#][^"']*)?["']/i.test(content);
+  if (loginForm || authwallLink) {
     throw new ProviderAuthenticationError();
   }
-  const isHtmlDocument = /<!doctype\s+html|<html\b|<body\b|<form\b/i.test(content);
-  const protectionMarkup = /checkpoint\/challenge|g-recaptcha|(?:id|class|name)=["'][^"']*captcha|<title[^>]*>[^<]*(?:security verification|consent)|<h[1-3][^>]*>[^<]*security verification|consent\.linkedin\.com/i;
-  if (isHtmlDocument && protectionMarkup.test(content)) {
+
+  const challengeTarget = /<(?:a|form|iframe|script)\b[^>]*(?:href|action|src)=["'][^"']*(?:checkpoint\/challenge|consent\.linkedin\.com)[^"']*["']/i.test(content);
+  const captchaMarkup = /g-recaptcha|(?:id|class|name)=["'][^"']*\bcaptcha\b[^"']*["']/i.test(content);
+  const verificationTitle = /<title[^>]*>\s*(?:security verification|consent)(?:\s*\|\s*LinkedIn)?\s*<\/title>/i.test(content);
+  const verificationHeading = /<h[1-3][^>]*>\s*(?:security verification|consent)\s*<\/h[1-3]>/i.test(content);
+  if (challengeTarget || captchaMarkup || (verificationTitle && verificationHeading)) {
     throw new ProviderProtectionError();
   }
 }
@@ -71,6 +79,7 @@ function assertExpectedContentType(response: Response, kind: ResponseKind): void
 async function readLimitedResponse(response: Response, maxBytes: number): Promise<string> {
   const contentLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
     throw new ProviderFetchError("LinkedIn response exceeded the configured size limit");
   }
   if (!response.body) return "";
@@ -271,7 +280,16 @@ export class LinkedInApiProvider implements ProfileProvider {
     };
 
     const readResponse = async (response: Response, kind: ResponseKind): Promise<string> => {
-      const content = await readLimitedResponse(response, this.config.maxResponseBytes ?? 5_000_000);
+      let content: string;
+      try {
+        content = await readLimitedResponse(response, this.config.maxResponseBytes ?? 5_000_000);
+      } catch (error) {
+        if (options.signal?.aborted && options.signal.reason instanceof Error) {
+          throw options.signal.reason;
+        }
+        if (error instanceof ProviderFetchError) throw error;
+        throw new ProviderFetchError(error instanceof Error ? error.message : undefined);
+      }
       assertNoProtectionPage(content);
       assertExpectedContentType(response, kind);
       return content;

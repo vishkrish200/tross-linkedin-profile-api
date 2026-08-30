@@ -23,18 +23,20 @@ const linkedinProvider = new LinkedInApiProvider({
   maxResponseBytes: config.linkedinMaxResponseBytes,
   requestLimiter,
 });
-const protectedProvider = new CircuitBreakerProvider(
-  linkedinProvider,
-  config.linkedinBreakerCooldownMs,
-);
 const budgetedProvider = config.accessMode === "public-demo"
   ? new ColdExtractionBudgetProvider(
-      protectedProvider,
+      linkedinProvider,
       config.publicDemoMaxColdExtractions,
     )
-  : protectedProvider;
-const concurrentProvider = new ConcurrencyProvider(
+  : linkedinProvider;
+// Keep the breaker outside the budget so rejected calls while the circuit is
+// open cannot exhaust cold-extraction credits without reaching LinkedIn.
+const protectedProvider = new CircuitBreakerProvider(
   budgetedProvider,
+  config.linkedinBreakerCooldownMs,
+);
+const concurrentProvider = new ConcurrencyProvider(
+  protectedProvider,
   config.linkedinMaxConcurrency,
   config.linkedinMaxQueueSize,
 );

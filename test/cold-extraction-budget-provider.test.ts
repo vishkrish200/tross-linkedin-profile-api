@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { CacheProvider } from "../src/provider/cache-provider.js";
+import { CircuitBreakerProvider } from "../src/provider/circuit-breaker-provider.js";
 import { ColdExtractionBudgetProvider } from "../src/provider/cold-extraction-budget-provider.js";
 import { ConcurrencyProvider } from "../src/provider/concurrency-provider.js";
 import {
   ProviderBusyError,
+  ProviderCircuitOpenError,
+  ProviderProtectionError,
   ProviderQuotaExceededError,
   type ProfileProvider,
 } from "../src/provider/profile-provider.js";
@@ -83,5 +86,27 @@ describe("ColdExtractionBudgetProvider", () => {
     await expect(provider.fetch("https://www.linkedin.com/in/after-budget/"))
       .rejects.toBeInstanceOf(ProviderQuotaExceededError);
     expect(inner.fetch).toHaveBeenCalledTimes(5);
+  });
+
+  it("does not spend cold-extraction credits while the circuit is open", async () => {
+    let now = 1_000;
+    const inner: ProfileProvider = {
+      fetch: vi.fn()
+        .mockRejectedValueOnce(new ProviderProtectionError())
+        .mockImplementation(async (url: string) => profile(url)),
+    };
+    const budgeted = new ColdExtractionBudgetProvider(inner, 2);
+    const provider = new CircuitBreakerProvider(budgeted, 1_000, () => now);
+
+    await expect(provider.fetch("https://www.linkedin.com/in/one/"))
+      .rejects.toBeInstanceOf(ProviderProtectionError);
+    for (let index = 0; index < 10; index += 1) {
+      await expect(provider.fetch(`https://www.linkedin.com/in/open-${index}/`))
+        .rejects.toBeInstanceOf(ProviderCircuitOpenError);
+    }
+    now = 2_001;
+    await expect(provider.fetch("https://www.linkedin.com/in/two/"))
+      .resolves.toMatchObject({ name: "Test Person" });
+    expect(inner.fetch).toHaveBeenCalledTimes(2);
   });
 });
