@@ -57,19 +57,19 @@ The work is isolated on `codex/full-codebase-review`. It has not been pushed, de
 | Coverage | 94.69% statements, 86.58% branches, 96.63% functions, 96.69% lines |
 | Production compile | Pass; clean runtime-only `dist/` |
 | Production dependency audit | 0 reported vulnerabilities |
-| Gitleaks working tree and all 28 reachable commits | No leaks found |
+| Gitleaks working tree and all 29 reachable commits | No leaks found |
 | Docker build and artifact inspection | Pass; no developer scripts, stale browser provider, `npm`, or `npx` in runtime |
 | Container endpoint smoke | Discovery, health, and OpenAPI pass; runtime user is `node` |
 | Independent Opus closure review | Four final findings closed; no new regression; `RELEASE` |
 
 Every committed synthetic profile fixture and adversarial shape is exercised by the deterministic suite. The prior 13-case authorized live matrix was also replayed through this branch's local server using its normal pacing, deadline, and circuit controls.
 
-- All eight profiles still available to the authorized session returned HTTP 200 with core identity fields and schema-valid output. The sample covered rich and sparse sections, About-present and About-absent profiles, pagination, certifications, languages, images, and two expected 50-skill truncation warnings.
-- Five historical profiles returned explicit LinkedIn unavailable/error pages with no profile identifier. All five now return `404 profile_unavailable`; an unknown missing-profile-identifier shape still fails loudly as `502 provider_fetch_failed`.
+- All nine profiles available to the authorized session returned HTTP 200 with core identity fields and schema-valid output. This includes case 2 after its stale slug was replaced with the current canonical profile URL supplied on August 31. The sample covered rich and sparse sections, About-present and About-absent profiles, pagination, certifications, languages, images, and expected 50-skill truncation warnings.
+- Four remaining historical profiles returned explicit LinkedIn unavailable/error pages with no profile identifier. All four return `404 profile_unavailable`; an unknown missing-profile-identifier shape still fails loudly as `502 provider_fetch_failed`.
 - One available profile reached the 25-second application deadline only after the cold batch saturated the process-wide 60-request rolling limiter. It passed alone in 5.8 seconds after the limiter window cleared, identifying a batch-safety boundary rather than an extraction defect.
 - No authentication, checkpoint, CAPTCHA, HTTP 429/999, or circuit-opening signal occurred.
 
-This is complete behavior evidence for all 13 cases in the dated matrix: eight successful extractions and five correctly classified unavailable profiles. It is not a claim that all 13 remain extractable or that every LinkedIn profile is supported.
+This is complete behavior evidence for all 13 cases in the updated matrix: nine successful extractions and four correctly classified unavailable profiles. It is not a claim that all 13 are extractable or that every LinkedIn profile is supported.
 
 ## Residual risks
 

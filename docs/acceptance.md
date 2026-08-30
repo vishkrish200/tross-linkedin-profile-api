@@ -33,13 +33,13 @@ The same source release passed 136 deterministic tests, TypeScript compilation, 
 
 The historical 13-profile matrix was replayed against local branch `codex/full-codebase-review` through its normal request pacing, deadline, and circuit controls. This was a local compatibility check, not a deployment.
 
-- All eight profiles still available to the authorized session returned HTTP 200 with core identity fields and schema-valid output.
+- All nine profiles available to the authorized session returned HTTP 200 with core identity fields and schema-valid output. This includes case 2 after its stale slug was replaced with the current canonical profile URL supplied on August 31.
 - The available sample covered rich and sparse sections, About-present and About-absent profiles, experience, education, paginated skills, certifications, languages, images, and two expected 50-skill truncation warnings.
-- Five historical profiles now returned explicit LinkedIn unavailable/error pages with no profile identifier. The branch was updated so each returns `404 profile_unavailable` instead of a misleading generic provider failure.
+- Four remaining historical profiles returned explicit LinkedIn unavailable/error pages with no profile identifier. The branch returns `404 profile_unavailable` for each instead of a misleading generic provider failure.
 - One available profile reached the 25-second application deadline only after the cold batch saturated the process-wide 60-request rolling limiter. It passed alone in 5.8 seconds after the limiter window cleared, confirming a batch-safety boundary rather than an extraction defect.
 - No authentication, checkpoint, CAPTCHA, HTTP 429/999, or circuit-opening signal occurred.
 
-Only case labels, field-presence flags, counts, warnings, status codes, timings, and structural unavailable indicators were retained. The result proves handling of every profile in that dated matrix—eight successful extractions and five correctly classified unavailable profiles—not universal LinkedIn compatibility.
+Only case labels, field-presence flags, counts, warnings, status codes, timings, and structural unavailable indicators were retained. The result proves handling of every profile in the updated matrix—nine successful extractions and four correctly classified unavailable profiles—not universal LinkedIn compatibility.
 
 ## Defects found through acceptance testing
 
