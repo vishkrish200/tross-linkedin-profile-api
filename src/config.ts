@@ -29,6 +29,8 @@ export type AppConfig = {
   linkedinMinRequestIntervalMs: number;
 };
 
+const minimumApiKeyLength = 32;
+
 function integer(
   env: NodeJS.ProcessEnv,
   name: string,
@@ -46,8 +48,8 @@ function integer(
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const apiKey = env.API_KEY?.trim() ? env.API_KEY : undefined;
-  const apiKeyPrevious = env.API_KEY_PREVIOUS?.trim() ? env.API_KEY_PREVIOUS : undefined;
+  const apiKey = env.API_KEY?.trim() || undefined;
+  const apiKeyPrevious = env.API_KEY_PREVIOUS?.trim() || undefined;
   const allowUnauthenticatedLocal = env.ALLOW_UNAUTHENTICATED_LOCAL === "true";
   const accessMode = env.ACCESS_MODE?.trim() || "bearer";
   if (accessMode !== "bearer" && accessMode !== "public-demo") {
@@ -59,6 +61,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(
       "API_KEY is required; set ALLOW_UNAUTHENTICATED_LOCAL=true only for local development",
     );
+  }
+  for (const [name, value] of [
+    ["API_KEY", apiKey],
+    ["API_KEY_PREVIOUS", apiKeyPrevious],
+  ] as const) {
+    if (value !== undefined && value.length < minimumApiKeyLength) {
+      throw new Error(`${name} must contain at least ${minimumApiKeyLength} characters`);
+    }
+  }
+  if (apiKey !== undefined && apiKey === apiKeyPrevious) {
+    throw new Error("API_KEY_PREVIOUS must differ from API_KEY");
   }
   const publicDemoExpiresAtRaw = env.PUBLIC_DEMO_EXPIRES_AT?.trim();
   const publicDemoExpiresAt = publicDemoExpiresAtRaw

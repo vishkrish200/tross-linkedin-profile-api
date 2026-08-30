@@ -20,7 +20,7 @@ describe("CacheProvider", () => {
   it("coalesces simultaneous misses for the same profile", async () => {
     let complete!: (value: Profile) => void;
     const inner = {
-      fetch: vi.fn((sourceUrl: string) => new Promise<Profile>((resolve) => {
+      fetch: vi.fn((_sourceUrl: string) => new Promise<Profile>((resolve) => {
         complete = resolve;
       })),
     };

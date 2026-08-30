@@ -112,8 +112,8 @@ Set these runtime values in `.env` using a session you are authorized to use:
 - `LINKEDIN_COOKIE`: the minimum cookie header required by the authenticated LinkedIn requests, normally containing `li_at` and `JSESSIONID`.
 - `LINKEDIN_CSRF_TOKEN`: the CSRF value observed on the authorized request. It may be omitted when `JSESSIONID` is present because the provider derives its unquoted value.
 - `ACCESS_MODE`: `bearer` by default; use `public-demo` only for a deliberately bounded evaluation deployment.
-- `API_KEY`: a required long random bearer token in the default mode. It may remain configured as a rollback credential while `public-demo` is active.
-- `API_KEY_PREVIOUS`: optional prior token for a short, deliberate rotation overlap; remove it after callers migrate.
+- `API_KEY`: a required random bearer token of at least 32 characters in the default mode. Generate one with a cryptographically secure source such as `openssl rand -hex 32`. It may remain configured as a rollback credential while `public-demo` is active.
+- `API_KEY_PREVIOUS`: optional, distinct prior token of at least 32 characters for a short, deliberate rotation overlap; remove it after callers migrate.
 - `PUBLIC_DEMO_EXPIRES_AT`: required ISO timestamp in `public-demo` mode. The route returns `410 public_demo_closed` at and after this instant.
 - `PUBLIC_DEMO_PER_CLIENT_RATE_LIMIT_MAX`, `PUBLIC_DEMO_GLOBAL_RATE_LIMIT_MAX`, `PUBLIC_DEMO_RATE_LIMIT_WINDOW`, and `PUBLIC_DEMO_MAX_COLD_EXTRACTIONS`: anonymous fairness and blast-radius controls.
 - `LINKEDIN_MAX_CONCURRENCY`: maximum distinct LinkedIn profile extractions in flight; defaults to `2`.
@@ -172,8 +172,11 @@ The reference deployment runs on Google Cloud Run with the LinkedIn session and 
 - `400 invalid_request`: malformed body or non-profile URL.
 - `401 unauthorized`: invalid or absent API bearer token in `bearer` mode.
 - `410 public_demo_closed`: the controlled public evaluation window has ended.
+- `413 payload_too_large`: the body exceeds the configured request limit.
+- `415 unsupported_media_type`: the request does not use a JSON content type.
 - `429 rate_limit_exceeded`: a caller or global public-demo quota was exceeded.
 - `429 public_demo_budget_exhausted`: the running instance consumed its uncached-extraction budget.
+- `500 internal_error`: an unexpected internal failure occurred without exposing internals.
 - `502 provider_authentication_failed`: LinkedIn rejected or redirected the runtime session.
 - `502 provider_fetch_failed`: upstream failure, rate limit, checkpoint signal, or unexpected response.
 - `503 provider_not_configured`: required LinkedIn runtime secrets are absent.

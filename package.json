@@ -13,9 +13,13 @@
     "start": "node dist/src/server.js",
     "smoke": "tsx scripts/smoke-profile.ts",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
+    "lint": "npm run lint:source && npm run lint:openapi",
+    "lint:source": "oxlint --deny-warnings --import-plugin src test scripts",
+    "lint:openapi": "tsx scripts/lint-openapi.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm run lint && npm run test:coverage"
   },
   "dependencies": {
     "@fastify/rate-limit": "11.2.0",
@@ -23,7 +27,10 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^25.0.0",
+    "@redocly/cli": "2.49.0",
+    "@types/node": "22.20.1",
+    "@vitest/coverage-v8": "4.1.11",
+    "oxlint": "1.80.0",
     "tsx": "4.23.12",
     "typescript": "7.0.2",
     "vitest": "4.1.11"

@@ -92,8 +92,13 @@ describe("profile API", () => {
     expect(documentation.body).not.toContain("authorization: Bearer");
 
     const openApi = (await app.inject({ method: "GET", url: "/openapi.json" })).json();
-    expect(openApi.paths["/v1/profiles"].post.security).toBeUndefined();
+    expect(openApi.paths["/v1/profiles"].post.security).toEqual([]);
+    expect(openApi.paths["/"].get.security).toEqual([]);
+    expect(openApi.paths["/health"].get.security).toEqual([]);
     expect(openApi.paths["/v1/profiles"].post.responses["410"]).toBeDefined();
+    expect(openApi.paths["/v1/profiles"].post.responses["413"]).toBeDefined();
+    expect(openApi.paths["/v1/profiles"].post.responses["415"]).toBeDefined();
+    expect(openApi.paths["/v1/profiles"].post.responses["500"]).toBeDefined();
     expect(openApi.components.securitySchemes).toBeUndefined();
     await app.close();
   });
@@ -297,6 +302,26 @@ describe("profile API", () => {
     await app.close();
   });
 
+  it("normalizes authenticated quota errors", async () => {
+    const app = await buildApp({ provider, apiKey: "secret", rateLimitMax: 1 });
+    const request = {
+      method: "POST" as const,
+      url: "/v1/profiles",
+      headers: { authorization: "Bearer secret" },
+      payload: { url: "https://www.linkedin.com/in/test-person/" },
+    };
+
+    expect((await app.inject(request)).statusCode).toBe(200);
+    const limited = await app.inject(request);
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toEqual({
+      error: "rate_limit_exceeded",
+      message: "Request quota exceeded",
+    });
+    expect(limited.headers["retry-after"]).toBeDefined();
+    await app.close();
+  });
+
   it("returns privacy-safe response headers", async () => {
     const app = await buildApp({ provider });
     const response = await app.inject({
@@ -318,6 +343,49 @@ describe("profile API", () => {
       payload: { url: `https://www.linkedin.com/in/${"a".repeat(2_000)}/` },
     });
     expect(response.statusCode).toBe(413);
+    expect(response.json()).toEqual({
+      error: "payload_too_large",
+      message: "Request body exceeds the configured size limit",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("normalizes malformed JSON parser errors", async () => {
+    const fetch = vi.fn(provider.fetch);
+    const app = await buildApp({ provider: { fetch } });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/profiles",
+      headers: { "content-type": "application/json" },
+      payload: "{",
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: "invalid_request",
+      message: "Request body must be valid JSON",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("requires a JSON request content type after bearer authentication", async () => {
+    const fetch = vi.fn(provider.fetch);
+    const app = await buildApp({ provider: { fetch }, apiKey: "secret" });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/profiles",
+      headers: {
+        authorization: "Bearer secret",
+        "content-type": "text/plain",
+      },
+      payload: "not-json",
+    });
+    expect(response.statusCode).toBe(415);
+    expect(response.json()).toEqual({
+      error: "unsupported_media_type",
+      message: "Content-Type must be application/json",
+    });
     expect(fetch).not.toHaveBeenCalled();
     await app.close();
   });

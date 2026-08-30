@@ -69,6 +69,56 @@ function anonymousClientKey(request: FastifyRequest): string {
   return createHash("sha256").update(`${networkIdentity}\0${userAgent}`).digest("hex");
 }
 
+function isJsonContentType(value: string | undefined): boolean {
+  if (!value) return false;
+  const mediaType = value.split(";", 1)[0]?.trim().toLowerCase();
+  return mediaType === "application/json" || mediaType?.endsWith("+json") === true;
+}
+
+function sendError(
+  reply: FastifyReply,
+  statusCode: number,
+  error: string,
+  message: string,
+) {
+  return reply.code(statusCode).send({ error, message });
+}
+
+function property(error: unknown, name: string): unknown {
+  return typeof error === "object" && error !== null && name in error
+    ? error[name as keyof typeof error]
+    : undefined;
+}
+
+function contentTypeError(error: unknown): {
+  statusCode: number;
+  error: string;
+  message: string;
+} | undefined {
+  switch (property(error, "code")) {
+    case "FST_ERR_CTP_INVALID_JSON_BODY":
+      return {
+        statusCode: 400,
+        error: "invalid_request",
+        message: "Request body must be valid JSON",
+      };
+    case "FST_ERR_CTP_BODY_TOO_LARGE":
+      return {
+        statusCode: 413,
+        error: "payload_too_large",
+        message: "Request body exceeds the configured size limit",
+      };
+    case "FST_ERR_CTP_INVALID_MEDIA_TYPE":
+      return {
+        statusCode: 415,
+        error: "unsupported_media_type",
+        message: "Content-Type must be application/json",
+      };
+    default:
+      return undefined;
+  }
+}
+
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -89,6 +139,39 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   const now = options.now ?? Date.now;
   const activeRequests = new Set<AbortController>();
+
+  app.setErrorHandler((error, request, reply) => {
+    const normalized = contentTypeError(error);
+    if (normalized) {
+      return sendError(
+        reply,
+        normalized.statusCode,
+        normalized.error,
+        normalized.message,
+      );
+    }
+
+    const candidateStatusCode = property(error, "statusCode");
+    const statusCode = typeof candidateStatusCode === "number"
+      ? candidateStatusCode
+      : undefined;
+    if (statusCode === 429) {
+      return sendError(reply, 429, "rate_limit_exceeded", "Request quota exceeded");
+    }
+    if (statusCode !== undefined && statusCode >= 400 && statusCode < 500) {
+      return sendError(reply, statusCode, "invalid_request", "Request could not be processed");
+    }
+
+    request.log.error({ err: error }, "Unhandled request error");
+    return sendError(reply, 500, "internal_error", "Unexpected server error");
+  });
+
+  app.setNotFoundHandler((_request, reply) => sendError(
+    reply,
+    404,
+    "not_found",
+    "Route not found",
+  ));
 
   app.addHook("preClose", async () => {
     const error = new ProviderFetchError("Service is shutting down");
@@ -220,6 +303,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           error: "unauthorized",
           message: "A valid bearer token is required",
         });
+      }
+      const contentType = request.headers["content-type"];
+      const contentTypeValue = Array.isArray(contentType) ? contentType[0] : contentType;
+      if (!isJsonContentType(contentTypeValue)) {
+        return sendError(
+          reply,
+          415,
+          "unsupported_media_type",
+          "Content-Type must be application/json",
+        );
       }
     },
     preHandler: accessMode === "bearer"

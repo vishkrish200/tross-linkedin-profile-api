@@ -213,7 +213,7 @@ export function extractAboutComponentRequest(
   let screenId = "com.linkedin.sdui.flagshipnav.profile.Profile";
   for (const value of rows.values()) {
     const screen = findRecord(value, rows, (record) =>
-      typeof record.screenId === "string" && /\.profile\.Profile$/.test(record.screenId));
+      typeof record.screenId === "string" && record.screenId.endsWith(".profile.Profile"));
     if (screen && typeof screen.screenId === "string") {
       screenId = screen.screenId;
       break;
@@ -485,7 +485,8 @@ function structuredImageUrls(
     if (root) {
       for (const rendition of renditions) {
         const suffix = rendition.suffixUrl as string;
-        if (/[\x00-\x20\\]/u.test(suffix)) continue;
+        if (suffix.includes("\\")
+          || [...suffix].some((character) => character.charCodeAt(0) <= 0x20)) continue;
         const candidate = `${root.toString()}${suffix}`;
         try {
           const url = new URL(candidate);

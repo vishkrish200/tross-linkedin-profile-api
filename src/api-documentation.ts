@@ -1,9 +1,5 @@
 import { z } from "zod";
 import {
-  certificationSchema,
-  educationSchema,
-  experienceSchema,
-  languageSchema,
   profileRequestSchema,
   profileSchema,
 } from "./domain/profile.js";
@@ -57,6 +53,7 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
         tags: ["Discovery"],
         summary: "Discover the API",
         operationId: "discoverApi",
+        security: [],
         responses: {
           "200": {
             description: "Service metadata and endpoint links.",
@@ -74,6 +71,7 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
         tags: ["Discovery"],
         summary: "Check service health",
         operationId: "getHealth",
+        security: [],
         responses: {
           "200": {
             description: "The HTTP service is ready.",
@@ -97,7 +95,7 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
         description:
           "Returns profile information visible to the configured authorized LinkedIn session. The service does not retry or bypass authentication, checkpoint, CAPTCHA, 429, or 999 signals.",
         operationId: "extractLinkedInProfile",
-        ...(bearerProtected ? { security: [{ bearerAuth: [] }] } : {}),
+        security: bearerProtected ? [{ bearerAuth: [] }] : [],
         requestBody: {
           required: true,
           content: {
@@ -119,7 +117,10 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
           "400": { $ref: "#/components/responses/InvalidRequest" },
           ...(bearerProtected ? { "401": { $ref: "#/components/responses/Unauthorized" } } : {}),
           ...(!bearerProtected ? { "410": { $ref: "#/components/responses/DemoClosed" } } : {}),
+          "413": { $ref: "#/components/responses/PayloadTooLarge" },
+          "415": { $ref: "#/components/responses/UnsupportedMediaType" },
           "429": { $ref: "#/components/responses/RateLimited" },
+          "500": { $ref: "#/components/responses/InternalError" },
           "502": { $ref: "#/components/responses/ProviderFailure" },
           "503": { $ref: "#/components/responses/ProviderNotConfigured" },
         },
@@ -186,10 +187,6 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
         properties: { data: { $ref: "#/components/schemas/Profile" } },
       },
       Profile: jsonSchema(profileSchema),
-      Experience: jsonSchema(experienceSchema),
-      Education: jsonSchema(educationSchema),
-      Certification: jsonSchema(certificationSchema),
-      Language: jsonSchema(languageSchema),
       Error: {
         type: "object",
         additionalProperties: false,
@@ -205,12 +202,23 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
         description: "Malformed body or unsupported profile URL.",
         content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
       },
-      Unauthorized: {
-        description: "The bearer token is missing or invalid.",
+      ...(bearerProtected ? {
+        Unauthorized: {
+          description: "The bearer token is missing or invalid.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+        },
+      } : {
+        DemoClosed: {
+          description: "The controlled public evaluation window has ended.",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+        },
+      }),
+      PayloadTooLarge: {
+        description: "The request body exceeds the configured size limit.",
         content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
       },
-      DemoClosed: {
-        description: "The controlled public evaluation window has ended.",
+      UnsupportedMediaType: {
+        description: "The request Content-Type is not JSON.",
         content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
       },
       RateLimited: {
@@ -226,6 +234,10 @@ export function buildOpenApiDocument(access: ApiAccessDescription) {
       },
       ProviderNotConfigured: {
         description: "Required LinkedIn runtime secrets are absent.",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+      },
+      InternalError: {
+        description: "An unexpected internal error occurred.",
         content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
       },
     },
@@ -445,7 +457,10 @@ export function buildApiDocumentationHtml(access: ApiAccessDescription): string 
             <tbody>
               <tr><td><code>400</code></td><td>Malformed body or unsupported profile URL.</td></tr>
               ${accessFailureRow}
+              <tr><td><code>413</code></td><td>Request body exceeds the configured size limit.</td></tr>
+              <tr><td><code>415</code></td><td>Request content type is not JSON.</td></tr>
               <tr><td><code>429</code></td><td>Caller quota exceeded; respect <code>Retry-After</code>.</td></tr>
+              <tr><td><code>500</code></td><td>Unexpected internal server error.</td></tr>
               <tr><td><code>502</code></td><td>LinkedIn authentication, protection, transport, or response-contract failure.</td></tr>
               <tr><td><code>503</code></td><td>LinkedIn runtime credentials are not configured.</td></tr>
             </tbody>

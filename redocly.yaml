@@ -1,0 +1,6 @@
+extends:
+  - recommended
+
+rules:
+  # Public discovery and health GETs have no meaningful caller-generated 4xx case.
+  operation-4xx-response: off
