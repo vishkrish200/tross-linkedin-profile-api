@@ -37,5 +37,5 @@ Tross emailed candidates to clarify that the LinkedIn solution must be purely re
 - [x] Run repository and Git-history secret scans
 - [x] Automate Git-history secret scanning in CI
 - [ ] Record and host the optional demo video
-- [ ] Deploy and live-verify the expiring controlled public-demo mode
+- [x] Deploy and live-verify the expiring controlled public-demo mode
 - [ ] Complete the Tross submission form
