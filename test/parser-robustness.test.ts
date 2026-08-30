@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { profileSchema } from "../src/domain/profile.js";
 import {
-  countSectionItems,
-  extractAboutComponentRequest,
-  extractCertifications,
-  extractEducation,
-  extractExperience,
-  extractLanguages,
-  extractProfileFromResponses,
-  extractSkills,
-} from "../src/provider/extract-profile.js";
+  countParsedSectionItems,
+  parseAboutComponentRequest,
+  parseLinkedInProfile,
+} from "../src/linkedin/profile-parser.js";
+import {
+  parseCertificationsSection,
+  parseEducationSection,
+  parseExperienceSection,
+  parseLanguagesSection,
+  parseSkillsSection,
+} from "../src/linkedin/section-parsers.js";
 import { profileHtml, skillsFlight } from "./fixtures/profile-responses.js";
 
 const emptyResponses = {
@@ -47,15 +49,15 @@ describe("adversarial React Flight parsing", () => {
 
     for (const input of variants) {
       const outputs = [
-        extractExperience(input),
-        extractEducation(input),
-        extractSkills(input),
-        extractCertifications(input),
-        extractLanguages(input),
+        parseExperienceSection(input),
+        parseEducationSection(input),
+        parseSkillsSection(input),
+        parseCertificationsSection(input),
+        parseLanguagesSection(input),
       ];
       for (const output of outputs) expect(output.length).toBeLessThanOrEqual(100);
       for (const section of ["experience", "education", "skills", "certifications", "languages"] as const) {
-        expect(countSectionItems(section, input)).toBeGreaterThanOrEqual(0);
+        expect(countParsedSectionItems(section, input)).toBeGreaterThanOrEqual(0);
       }
     }
   });
@@ -71,12 +73,12 @@ describe("adversarial React Flight parsing", () => {
     ];
 
     for (const mutation of mutations) {
-      const profile = extractProfileFromResponses(
+      const profile = parseLinkedInProfile({
         profileHtml,
-        { ...emptyResponses, skills: [mutation] },
-        "https://www.linkedin.com/in/vishnu-example/",
-        new Date("2026-08-29T00:00:00.000Z"),
-      );
+        sectionPages: { ...emptyResponses, skills: [mutation] },
+        sourceUrl: "https://www.linkedin.com/in/vishnu-example/",
+        fetchedAt: new Date("2026-08-29T00:00:00.000Z"),
+      });
       expect(() => profileSchema.parse(profile)).not.toThrow();
       expect(profile.name).toBe("Vishnu Example");
       expect(profile.skills.length).toBeLessThanOrEqual(20);
@@ -91,7 +93,7 @@ describe("adversarial React Flight parsing", () => {
       `<script id="rehydrate-data">window.__como_rehydration__ = ${JSON.stringify(["0:$missing"])};</script>`,
     ];
     for (const input of malformed) {
-      expect(() => extractAboutComponentRequest(input)).not.toThrow();
+      expect(() => parseAboutComponentRequest(input)).not.toThrow();
     }
   });
 });

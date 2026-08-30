@@ -16,7 +16,7 @@ This service depends on undocumented LinkedIn HTTP and React Flight contracts. I
 - Pagination validates every page, rejects declared-item/parser-count discrepancies, unknown empty shapes, and repeated pages. The hand-owned schema and extractor both enforce the intentional 50-item cap, including when an upstream page contains more records than requested, and return a completeness warning.
 - Explicit LinkedIn unavailable/not-found profile pages return `404 profile_unavailable`; a missing profile identifier without that evidence remains a fail-closed upstream contract error.
 - The parser bounds reference/object traversal, joins credential links to collection identities instead of array positions, and omits a link when only an ambiguous positional association exists. It rejects unsafe credential and image URLs, caps image output, preserves richer duplicate records, and validates the final public object with hand-owned Zod schemas. A provider contract violation is reported as an upstream `502`, never as malformed caller input.
-- `SIGINT`/`SIGTERM` initiate Fastify shutdown and abort active extraction controllers. The smoke command emits privacy-minimized structural evidence only.
+- `SIGINT`/`SIGTERM` initiate Fastify shutdown and abort active extraction controllers. Both smoke commands emit privacy-minimized structural evidence; the HTTP matrix runner prints numeric case labels, never profile slugs or personal text.
 - CI enforces zero-warning source lint, recommended OpenAPI lint for both access modes, coverage thresholds, dependency and full-history secret auditing, a production image build, and a pinned high/critical Trivy scan. Production compilation cleans stale output and emits runtime source only; the runtime layer excludes developer scripts, removes unused package-manager tooling, and runs as the unprivileged `node` user.
 
 ## Deterministic adversarial catalog
@@ -32,6 +32,7 @@ The local suite covers:
 - Short, whitespace-only, multi-paragraph, emoji, RTL, CJK, combining-character, zero-width, label-like, and product-name-bearing About values; adjacent section-label rejection; empty `children` with populated `initialContent`; and the current explicit-empty advertised-card structure.
 - Grouped and overlapping roles, undated work, career breaks, missing optional fields, delimiter-bearing company names, non-bulleted descriptions, multiple degrees at one school, renewed certificates, marker-only and non-semantic collection entities, language proficiency, HTML title entities, unsafe redirects, absent/custom/partial/over-limit images, and unrelated or malformed image candidates.
 - Missing, duplicate, cyclic, deeply nested, malformed, CRLF, and non-hex React Flight rows plus deterministic fixture mutations. Assertions require bounded execution, schema-valid output, and no invented malformed-section values.
+- Matrix-runner privacy and fail-fast behavior: invalid contracts, non-JSON bodies, upstream failures, and unexpected unavailable profiles stop the run. A 404 is a valid API outcome, but not a successful extraction of an expected-available matrix case.
 
 ## Residual risks and production work
 

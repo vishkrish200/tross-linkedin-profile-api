@@ -6,7 +6,7 @@ const defaultWait: Wait = async (milliseconds, signal) => {
   await delay(milliseconds, undefined, signal ? { signal } : undefined);
 };
 
-export class UpstreamRequestLimiter {
+export class LinkedInRequestLimiter {
   private readonly starts: number[] = [];
   private lock: Promise<void> = Promise.resolve();
 

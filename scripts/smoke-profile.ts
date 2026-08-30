@@ -1,11 +1,11 @@
-import { profileSchema } from "../src/domain/profile.js";
+import { PROFILE_SECTION_ITEM_LIMIT, profileSchema } from "../src/domain/profile.js";
 import { normalizeLinkedInProfileUrl } from "../src/domain/linkedin-url.js";
-import { LinkedInApiProvider } from "../src/provider/linkedin-api-provider.js";
+import { LinkedInProfileProvider } from "../src/linkedin/profile-provider.js";
 
 const profileUrl = process.env.PROFILE_URL;
 if (!profileUrl) throw new Error("PROFILE_URL is required");
 
-const provider = new LinkedInApiProvider({
+const provider = new LinkedInProfileProvider({
   ...(process.env.LINKEDIN_COOKIE ? { cookie: process.env.LINKEDIN_COOKIE } : {}),
   ...(process.env.LINKEDIN_CSRF_TOKEN ? { csrfToken: process.env.LINKEDIN_CSRF_TOKEN } : {}),
   ...(process.env.LINKEDIN_USER_AGENT ? { userAgent: process.env.LINKEDIN_USER_AGENT } : {}),
@@ -30,6 +30,6 @@ console.log(JSON.stringify({
     warnings: profile.warnings.length,
   },
   possiblyTruncatedSections: profile.warnings
-    .filter((warning) => warning.includes("50-item safety limit"))
+    .filter((warning) => warning.includes(`${PROFILE_SECTION_ITEM_LIMIT}-item safety limit`))
     .map((warning) => warning.split(" ", 1)[0]),
 }, null, 2));

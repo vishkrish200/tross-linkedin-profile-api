@@ -18,13 +18,16 @@ A browser-free TypeScript API that reverse-engineers LinkedIn's server-rendered 
 
 During the bounded challenge-review window, the profile route runs in an explicit controlled public-demo mode: no caller token is required. Reviewer traffic has generous minute-level quotas, while cache/coalescing, a bounded distinct-profile queue, a cold-extraction budget, LinkedIn concurrency and pacing, expiry, and a circuit breaker independently protect the upstream session. Bearer protection remains the default for normal deployments.
 
-## Status
+## Release status
 
-The HTTP API, strict URL validation, direct LinkedIn HTTP client, React Flight extraction, lazy-card loading, section pagination, cache, request pacing, circuit protection, Docker packaging, and deterministic adversarial tests are implemented. The deployed application does not launch or depend on a browser.
+| Surface | Source of truth |
+| --- | --- |
+| Source | The public `main` branch |
+| Deployed revision and access limits | [`GET /`](https://tross-linkedin-profile-api-583248531894.asia-south1.run.app/) |
+| Deterministic verification | The CI badge above; locally, `npm run check` |
+| Live compatibility and release evidence | [`docs/acceptance.md`](docs/acceptance.md) |
 
-The August 29 acceptance audit passed its 13-profile matrix. Cloud Run revision `tross-linkedin-profile-api-00009-p5w` returned all 11 visible About sections with exact normalized length/hash matches, preserved paginated skills and certifications, recovered missing experience details, returned visible credential links, and selected the exact framed owner image in the custom-photo case. On August 30, source commit `3d6cd21` was deployed as `tross-linkedin-profile-api-3d6cd21`; 155 deterministic tests, enforced coverage thresholds, source and OpenAPI lint, dependency and secret audits, a high/critical container scan, public discovery, both one-instance ceilings, normalized error responses, and a privacy-minimized 100-request tokenless production burst passed. The aggregate evidence and residual limits are recorded in [`docs/acceptance.md`](docs/acceptance.md). LinkedIn's private endpoints and response shapes can still change without notice, so dated live compatibility is not a permanent or universal guarantee.
-
-Live HTTPS endpoint: [`https://tross-linkedin-profile-api-583248531894.asia-south1.run.app`](https://tross-linkedin-profile-api-583248531894.asia-south1.run.app). Discovery, documentation, OpenAPI, health, and the controlled profile demo are public during the documented evaluation window; the discovery response reports the active access mode and limits.
+The service implements direct profile-page and RSC requests, lazy About-card loading, bounded section pagination, a stable response schema, and process-wide operational controls. It does not launch a browser. Live evidence is dated and sample-bounded because LinkedIn's private contracts can change without notice.
 
 ## Platform and data warning
 
@@ -97,12 +100,25 @@ Only HTTPS URLs on `linkedin.com` or `www.linkedin.com` whose path is exactly `/
 
 No Playwright, Chromium, Selenium, or browser session is used by the application.
 
+### Code reading guide
+
+| File or directory | Responsibility |
+| --- | --- |
+| [`src/server.ts`](src/server.ts) | Configuration, ordered provider assembly, startup, and shutdown |
+| [`src/app.ts`](src/app.ts) | HTTP routes, access checks, request validation, and error responses |
+| [`src/domain/`](src/domain/) | Public profile schema and accepted LinkedIn URLs |
+| [`src/linkedin/profile-provider.ts`](src/linkedin/profile-provider.ts) | Request the profile page, optional About card, and section pages |
+| [`src/linkedin/profile-parser.ts`](src/linkedin/profile-parser.ts) | Parse page fields and assemble the public profile |
+| [`src/linkedin/section-parsers.ts`](src/linkedin/section-parsers.ts) | Map LinkedIn section shapes into typed entries |
+| [`src/linkedin/react-flight-parser.ts`](src/linkedin/react-flight-parser.ts) | Decode bounded Flight rows and resolve references |
+| [`src/provider/`](src/provider/) | Shared provider contract, cache, deadline, queue, budget, and circuit breaker |
+
 ## Local setup
 
 Prerequisites: Node.js 22 or newer.
 
 ```bash
-npm install
+npm ci
 cp .env.example .env
 npm run check
 ```
@@ -148,6 +164,14 @@ PROFILE_URL=https://www.linkedin.com/in/example-person/ npm run smoke
 ```
 
 The smoke command intentionally prints only the profile slug, field-presence flags, counts, and truncation labels. It does not print biographies, descriptions, contact data, credentials, or full upstream/API responses.
+
+To replay an authorized matrix through the HTTP API and all runtime controls, put unique case labels and full canonical profile URLs in a private JSON file under the ignored `tmp/` directory, then run:
+
+```bash
+PROFILE_MATRIX_FILE=tmp/profile-matrix.json npm run smoke:matrix
+```
+
+The file format is `[{"case":1,"url":"https://www.linkedin.com/in/example-person/"}]`. The runner defaults to `http://127.0.0.1:3000/v1/profiles`; set `PROFILE_API_URL` for another authorized endpoint. It waits 20 seconds between completed cases, stops on the first failed response, and prints only case labels and structural evidence. Never construct a matrix from partial names or search patterns.
 
 ## Deployment
 
@@ -197,7 +221,7 @@ The reference deployment runs on Google Cloud Run with the LinkedIn session and 
 - A section returns at most 50 entries because upstream pagination and the public schema are intentionally bounded. A full fifth page or upstream page-size over-delivery adds a `possibly truncated` warning.
 - Synthetic React Flight fixtures prove deterministic parsing; the dated live smoke test is the separate compatibility check.
 
-For component responsibilities, see [`docs/architecture.md`](docs/architecture.md). The privacy-minimized live evidence is in [`docs/acceptance.md`](docs/acceptance.md). The hardening controls, adversarial test catalog, and residual risks are in [`docs/hardening.md`](docs/hardening.md). The balanced-modularity and full-review decisions are in [`docs/code-review-2026-08-31.md`](docs/code-review-2026-08-31.md). The delivery checklist is in [`docs/challenge-notes.md`](docs/challenge-notes.md).
+For request flow and design boundaries, see [`docs/architecture.md`](docs/architecture.md). Live evidence is in [`docs/acceptance.md`](docs/acceptance.md), and defensive controls plus adversarial coverage are in [`docs/hardening.md`](docs/hardening.md).
 
 ## Repository hygiene
 

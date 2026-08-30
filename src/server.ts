@@ -1,57 +1,62 @@
 import { buildApp } from "./app.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, type AppConfig } from "./config.js";
+import { LinkedInProfileProvider } from "./linkedin/profile-provider.js";
+import { LinkedInRequestLimiter } from "./linkedin/request-limiter.js";
 import { buildLoggerOptions } from "./logging.js";
 import { CacheProvider } from "./provider/cache-provider.js";
 import { CircuitBreakerProvider } from "./provider/circuit-breaker-provider.js";
 import { ColdExtractionBudgetProvider } from "./provider/cold-extraction-budget-provider.js";
 import { ConcurrencyProvider } from "./provider/concurrency-provider.js";
 import { DeadlineProvider } from "./provider/deadline-provider.js";
-import { LinkedInApiProvider } from "./provider/linkedin-api-provider.js";
-import { UpstreamRequestLimiter } from "./provider/upstream-request-limiter.js";
+import type { ProfileProvider } from "./provider/profile-provider.js";
+
+function buildProfileProvider(config: AppConfig): ProfileProvider {
+  const requestLimiter = new LinkedInRequestLimiter(
+    config.linkedinRequestsPerMinute,
+    60_000,
+    config.linkedinMinRequestIntervalMs,
+  );
+  const linkedInProvider = new LinkedInProfileProvider({
+    ...(config.linkedinCookie ? { cookie: config.linkedinCookie } : {}),
+    ...(config.linkedinCsrfToken ? { csrfToken: config.linkedinCsrfToken } : {}),
+    ...(config.linkedinUserAgent ? { userAgent: config.linkedinUserAgent } : {}),
+    requestTimeoutMs: config.linkedinRequestTimeoutMs,
+    maxResponseBytes: config.linkedinMaxResponseBytes,
+    requestLimiter,
+  });
+  const budgetLimitedProvider = config.accessMode === "public-demo"
+    ? new ColdExtractionBudgetProvider(
+        linkedInProvider,
+        config.publicDemoMaxColdExtractions,
+      )
+    : linkedInProvider;
+  // Keep the breaker outside the budget so open-circuit rejections do not
+  // consume cold-extraction credits without reaching LinkedIn.
+  const circuitProtectedProvider = new CircuitBreakerProvider(
+    budgetLimitedProvider,
+    config.linkedinBreakerCooldownMs,
+  );
+  const concurrencyLimitedProvider = new ConcurrencyProvider(
+    circuitProtectedProvider,
+    config.linkedinMaxConcurrency,
+    config.linkedinMaxQueueSize,
+  );
+  const deadlineLimitedProvider = new DeadlineProvider(
+    concurrencyLimitedProvider,
+    config.linkedinExtractionTimeoutMs,
+  );
+  return new CacheProvider(
+    deadlineLimitedProvider,
+    config.cacheTtlMs,
+    Date.now,
+    config.cacheMaxEntries,
+  );
+}
 
 const config = loadConfig();
-const requestLimiter = new UpstreamRequestLimiter(
-  config.linkedinRequestsPerMinute,
-  60_000,
-  config.linkedinMinRequestIntervalMs,
-);
-const linkedinProvider = new LinkedInApiProvider({
-  ...(config.linkedinCookie ? { cookie: config.linkedinCookie } : {}),
-  ...(config.linkedinCsrfToken ? { csrfToken: config.linkedinCsrfToken } : {}),
-  ...(config.linkedinUserAgent ? { userAgent: config.linkedinUserAgent } : {}),
-  requestTimeoutMs: config.linkedinRequestTimeoutMs,
-  maxResponseBytes: config.linkedinMaxResponseBytes,
-  requestLimiter,
-});
-const budgetedProvider = config.accessMode === "public-demo"
-  ? new ColdExtractionBudgetProvider(
-      linkedinProvider,
-      config.publicDemoMaxColdExtractions,
-    )
-  : linkedinProvider;
-// Keep the breaker outside the budget so rejected calls while the circuit is
-// open cannot exhaust cold-extraction credits without reaching LinkedIn.
-const protectedProvider = new CircuitBreakerProvider(
-  budgetedProvider,
-  config.linkedinBreakerCooldownMs,
-);
-const concurrentProvider = new ConcurrencyProvider(
-  protectedProvider,
-  config.linkedinMaxConcurrency,
-  config.linkedinMaxQueueSize,
-);
-const upstreamProvider = new DeadlineProvider(
-  concurrentProvider,
-  config.linkedinExtractionTimeoutMs,
-);
-const provider = new CacheProvider(
-  upstreamProvider,
-  config.cacheTtlMs,
-  Date.now,
-  config.cacheMaxEntries,
-);
+const profileProvider = buildProfileProvider(config);
 const app = await buildApp({
-  provider,
+  provider: profileProvider,
   accessMode: config.accessMode === "public-demo"
     || (!config.apiKey && config.allowUnauthenticatedLocal)
     ? "public-demo"

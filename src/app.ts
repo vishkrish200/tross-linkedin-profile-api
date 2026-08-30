@@ -26,7 +26,6 @@ import {
 export type BuildAppOptions = {
   provider: ProfileProvider;
   accessMode?: "bearer" | "public-demo";
-  apiKey?: string;
   apiKeys?: readonly string[];
   logger?: FastifyServerOptions["logger"];
   bodyLimit?: number;
@@ -132,10 +131,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     global: false,
   });
 
-  const apiKeys = [...new Set([
-    ...(options.apiKey ? [options.apiKey] : []),
-    ...(options.apiKeys ?? []),
-  ].map((key) => key.trim()).filter(Boolean))];
+  const apiKeys = [...new Set(
+    (options.apiKeys ?? []).map((key) => key.trim()).filter(Boolean),
+  )];
   const accessMode = options.accessMode ?? (apiKeys.length ? "bearer" : "public-demo");
   if (accessMode === "bearer" && apiKeys.length === 0) {
     throw new Error("Bearer access mode requires at least one API key");

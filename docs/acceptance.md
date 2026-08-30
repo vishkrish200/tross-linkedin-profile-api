@@ -2,6 +2,22 @@
 
 This document publishes aggregate, privacy-minimized evidence for the Tross hiring challenge. The internal audit used authorized LinkedIn access but does not publish profile slugs, biographies, descriptions, contact data, cookies, tokens, or complete live responses.
 
+## August 31 readability-release verification
+
+The reorganized LinkedIn adapter passed the original 13-profile matrix using its exact canonical URLs through a freshly started local HTTP API. This exercised bearer access, URL validation, cache, deadline, queue, circuit breaker, request pacing, parsing, and public response validation together. Calls were sequential with 20 seconds between completed cases; the runner stops on the first failure.
+
+- 13/13 requests returned HTTP 200 and schema-valid profiles, with name, headline, location, and profile images present in every case.
+- About was present in 11 cases and omitted in two. The sample included grouped and standalone experience, sparse/empty sections, education, paginated skills, a 21-certification profile, and up to five languages.
+- Three profiles returned 50 skills with an explicit possible-truncation warning. No section exceeded the public limit.
+- Individual requests took 4.0–8.2 seconds. No timeout, unavailable-profile response, authentication failure, checkpoint, CAPTCHA, HTTP 429/999, or retry occurred.
+- The local server retained the standard 25-second extraction deadline, 60 LinkedIn requests/minute, and 100 ms minimum upstream spacing. Production has stricter pacing; this local matrix is not a production load test.
+- All 180 deterministic tests passed, including five matrix-runner privacy/failure tests. Typechecking, zero-warning source lint, both OpenAPI access modes, and the production build passed. Coverage was 94.68% statements, 86.54% branches, 96.68% functions, and 96.68% lines.
+- Dependency audit and Git-history/staged-diff secret scans were clean. The production container passed discovery/docs/OpenAPI/health and 401/400 boundary checks as an unprivileged user; its scan reported no fixable high/critical vulnerabilities. Cloud Build upload enumeration included no private environment, authentication, or temporary audit files.
+
+Correction to the earlier August 31 record: the initial replay was mistakenly assembled from partial search identifiers rather than the original canonical URLs. Its eight-success/five-unavailable and later nine-success/four-unavailable conclusions are withdrawn. Five URLs were truncated, and two successful requests could have referred to different profiles. The corrected run above succeeded for all 13 intended URLs; it does not support an unavailable-profile claim about any of them.
+
+This recheck retained only case labels, field-presence flags, counts, warning categories, status codes, and timings. It did not repeat the August 29 field-by-field browser comparison and does not prove semantic completeness or universal LinkedIn compatibility.
+
 ## Dated live audit
 
 On August 29, 2026, Cloud Run revision `tross-linkedin-profile-api-00009-p5w` passed a 13-profile acceptance matrix using direct LinkedIn HTTP and React Flight/RSC requests. The deployed application did not launch or depend on a browser; a signed-in browser was used only for read-only comparison with the visible profile UI.
@@ -29,18 +45,6 @@ An initial bounded release-candidate canary covered a content-rich profile, a pr
 
 The same source release passed 136 deterministic tests, TypeScript compilation, a production Docker build and endpoint smoke test, a production-dependency audit with zero reported vulnerabilities, and a full-history secret scan. Its public discovery, human-readable docs, OpenAPI 3.1 document, health route, and unauthenticated 401 boundary were also verified after deployment. Only field-presence flags, aggregate counts, generic warnings, and status codes were retained from live calls.
 
-## August 31 local review-branch recheck
-
-The historical 13-profile matrix was replayed against local branch `codex/full-codebase-review` through its normal request pacing, deadline, and circuit controls. This was a local compatibility check, not a deployment.
-
-- All nine profiles available to the authorized session returned HTTP 200 with core identity fields and schema-valid output. This includes case 2 after its stale slug was replaced with the current canonical profile URL supplied on August 31.
-- The available sample covered rich and sparse sections, About-present and About-absent profiles, experience, education, paginated skills, certifications, languages, images, and two expected 50-skill truncation warnings.
-- Four remaining historical profiles returned explicit LinkedIn unavailable/error pages with no profile identifier. The branch returns `404 profile_unavailable` for each instead of a misleading generic provider failure.
-- One available profile reached the 25-second application deadline only after the cold batch saturated the process-wide 60-request rolling limiter. It passed alone in 5.8 seconds after the limiter window cleared, confirming a batch-safety boundary rather than an extraction defect.
-- No authentication, checkpoint, CAPTCHA, HTTP 429/999, or circuit-opening signal occurred.
-
-Only case labels, field-presence flags, counts, warnings, status codes, timings, and structural unavailable indicators were retained. The result proves handling of every profile in the updated matrix—nine successful extractions and four correctly classified unavailable profiles—not universal LinkedIn compatibility.
-
 ## Defects found through acceptance testing
 
 The live matrix found and drove regression fixes for:
@@ -55,7 +59,7 @@ The live matrix found and drove regression fixes for:
 
 All committed regression fixtures are synthetic and sanitized.
 
-## Final submission release
+## August 30 bounded public-demo release
 
 On August 30, source commit `3d6cd21` was deployed as Cloud Run revision `tross-linkedin-profile-api-3d6cd21` at 100% traffic. The final release added explicit public-demo access, uniform HTTP error envelopes, stronger bearer-key validation, a bounded distinct-profile FIFO queue, and enforced release gates.
 

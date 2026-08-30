@@ -9,14 +9,13 @@ import {
   type Profile,
 } from "../domain/profile.js";
 import {
-  countDeclaredSectionItems,
   experienceKey,
-  extractCertifications,
-  extractEducation,
-  extractExperience,
-  extractLanguages,
-  extractSkills,
-} from "./extract-profile-sections.js";
+  parseCertificationsSection,
+  parseEducationSection,
+  parseExperienceSection,
+  parseLanguagesSection,
+  parseSkillsSection,
+} from "./section-parsers.js";
 import {
   clean,
   findRecord,
@@ -26,16 +25,7 @@ import {
   semanticRows,
   unique,
   type FlightRow,
-} from "./react-flight.js";
-
-export {
-  countDeclaredSectionItems,
-  extractCertifications,
-  extractEducation,
-  extractExperience,
-  extractLanguages,
-  extractSkills,
-};
+} from "./react-flight-parser.js";
 
 export type LinkedInSection =
   | "experience"
@@ -44,13 +34,14 @@ export type LinkedInSection =
   | "certifications"
   | "languages";
 
-export type LinkedInResponses = Record<LinkedInSection, string[]>;
+export type LinkedInSectionPages = Record<LinkedInSection, string[]>;
 
 export function sectionLimitWarning(section: LinkedInSection): string {
   return `${section} reached the ${PROFILE_SECTION_ITEM_LIMIT}-item safety limit and may be truncated.`;
 }
 
-type Identity = {
+// Profile-page and lazy About-card parsing.
+type ParsedProfilePage = {
   profileId?: string;
   name?: string;
   headline?: string;
@@ -66,7 +57,7 @@ export type LinkedInComponentRequest = {
 
 // undefined means the layout has no matching lazy-card wrapper; null means the
 // wrapper exists but LinkedIn changed the request contract.
-export function extractAboutComponentRequest(
+export function parseAboutComponentRequest(
   profileHtml: string,
 ): LinkedInComponentRequest | null | undefined {
   const rows = parseRows(profileHtml);
@@ -195,6 +186,8 @@ export function isKnownEmptyAboutComponent(input: string): boolean {
     && [...parsed.rows.values()].some((value) => hasExplicitEmptySlot(value));
 }
 
+// Profile-image parsing. Structured Flight data is authoritative; raw URL
+// matching is a constrained fallback for older response shapes.
 function structuredImageUrls(
   value: unknown,
   rows: Map<string, unknown>,
@@ -293,7 +286,7 @@ function validImageUrls(decoded: string): string[] {
   ).slice(0, PROFILE_IMAGE_LIMIT);
 }
 
-function identityImageUrls(
+function profileImageUrls(
   headerRow: FlightRow | undefined,
   rows: Map<string, unknown>,
   decoded: string,
@@ -338,7 +331,10 @@ function decodeHtmlText(value: string): string {
   );
 }
 
-export function extractIdentity(profileHtml: string, profileCardResponses: string[] = []): Identity {
+export function parseProfilePage(
+  profileHtml: string,
+  profileCardResponses: string[] = [],
+): ParsedProfilePage {
   const decoded = flightStreams(profileHtml).join("\n");
   const rawTitle = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(profileHtml)?.[1];
   const title = clean(rawTitle ? decodeHtmlText(rawTitle) : undefined);
@@ -380,39 +376,53 @@ export function extractIdentity(profileHtml: string, profileCardResponses: strin
     ...(headline ? { headline } : {}),
     ...(location ? { location } : {}),
     ...(about ? { about } : {}),
-    profileImages: identityImageUrls(headerRow, parsed.rows, decoded).slice(0, PROFILE_IMAGE_LIMIT),
+    profileImages: profileImageUrls(headerRow, parsed.rows, decoded).slice(0, PROFILE_IMAGE_LIMIT),
   };
 }
 
+// Final public-profile assembly and completeness warnings.
 type SectionValue = Experience | Education | string | Certification | Language;
-const sectionExtractors: Record<LinkedInSection, (input: string) => SectionValue[]> = {
-  experience: extractExperience,
-  education: extractEducation,
-  skills: extractSkills,
-  certifications: extractCertifications,
-  languages: extractLanguages,
+const sectionParsers: Record<LinkedInSection, (input: string) => SectionValue[]> = {
+  experience: parseExperienceSection,
+  education: parseEducationSection,
+  skills: parseSkillsSection,
+  certifications: parseCertificationsSection,
+  languages: parseLanguagesSection,
 };
 
-export function countSectionItems(section: LinkedInSection, input: string): number {
-  return sectionExtractors[section](input).length;
+export function countParsedSectionItems(section: LinkedInSection, input: string): number {
+  return sectionParsers[section](input).length;
 }
 
-export function sectionPageSignature(section: LinkedInSection, input: string): string {
-  const values = sectionExtractors[section](input);
+export function hashParsedSectionPage(section: LinkedInSection, input: string): string {
+  const values = sectionParsers[section](input);
   return createHash("sha256").update(JSON.stringify(values)).digest("hex");
 }
 
-export function extractProfileFromResponses(
-  profileHtml: string,
-  responses: LinkedInResponses,
-  sourceUrl: string,
-  now: Date = new Date(),
-  profileCardResponses: string[] = [],
-  additionalWarnings: string[] = [],
-): Profile {
-  const identity = extractIdentity(profileHtml, profileCardResponses);
-  let experience = unique(responses.experience.flatMap(extractExperience), experienceKey);
-  let education = unique(responses.education.flatMap(extractEducation), (value) => [
+export type ParseLinkedInProfileInput = {
+  profileHtml: string;
+  sectionPages: LinkedInSectionPages;
+  sourceUrl: string;
+  fetchedAt?: Date;
+  profileCardResponses?: string[];
+  warnings?: string[];
+};
+
+export function parseLinkedInProfile(input: ParseLinkedInProfileInput): Profile {
+  const {
+    profileHtml,
+    sectionPages,
+    sourceUrl,
+    fetchedAt = new Date(),
+    profileCardResponses = [],
+    warnings: additionalWarnings = [],
+  } = input;
+  const profilePage = parseProfilePage(profileHtml, profileCardResponses);
+  let experience = unique(
+    sectionPages.experience.flatMap(parseExperienceSection),
+    experienceKey,
+  );
+  let education = unique(sectionPages.education.flatMap(parseEducationSection), (value) => [
     value.school,
     value.degree ?? "",
     value.fieldOfStudy ?? "",
@@ -420,19 +430,21 @@ export function extractProfileFromResponses(
     value.description ?? "",
   ].join("|"));
   let skills = unique(
-    responses.skills.flatMap(extractSkills),
+    sectionPages.skills.flatMap(parseSkillsSection),
     (value) => value.normalize("NFKC").toLowerCase(),
   );
-  let certifications = unique(responses.certifications.flatMap(extractCertifications), (value) =>
-    [
+  let certifications = unique(
+    sectionPages.certifications.flatMap(parseCertificationsSection),
+    (value) => [
       value.name,
       value.issuer ?? "",
       value.issued ?? "",
       value.credentialId ?? "",
       value.credentialUrl ?? "",
-    ].join("|"));
+    ].join("|"),
+  );
   let languages = unique(
-    responses.languages.flatMap(extractLanguages),
+    sectionPages.languages.flatMap(parseLanguagesSection),
     (value) => `${value.name.normalize("NFKC").toLowerCase()}|${value.proficiency ?? ""}`,
   );
   const warnings: string[] = [...new Set(additionalWarnings)];
@@ -447,25 +459,25 @@ export function extractProfileFromResponses(
   skills = capSection("skills", skills);
   certifications = capSection("certifications", certifications);
   languages = capSection("languages", languages);
-  if (!identity.name) warnings.push("Profile name was not present in LinkedIn's response.");
-  if (!identity.headline) warnings.push("Profile headline was not present in LinkedIn's response.");
-  if (!identity.location) warnings.push("Profile location was not present in LinkedIn's response.");
+  if (!profilePage.name) warnings.push("Profile name was not present in LinkedIn's response.");
+  if (!profilePage.headline) warnings.push("Profile headline was not present in LinkedIn's response.");
+  if (!profilePage.location) warnings.push("Profile location was not present in LinkedIn's response.");
   if (!experience.length) warnings.push("No experience entries were returned by LinkedIn.");
   if (!education.length) warnings.push("No education entries were returned by LinkedIn.");
 
   return {
     sourceUrl,
-    fetchedAt: now.toISOString(),
-    ...(identity.name ? { name: identity.name } : {}),
-    ...(identity.headline ? { headline: identity.headline } : {}),
-    ...(identity.location ? { location: identity.location } : {}),
-    ...(identity.about ? { about: identity.about } : {}),
+    fetchedAt: fetchedAt.toISOString(),
+    ...(profilePage.name ? { name: profilePage.name } : {}),
+    ...(profilePage.headline ? { headline: profilePage.headline } : {}),
+    ...(profilePage.location ? { location: profilePage.location } : {}),
+    ...(profilePage.about ? { about: profilePage.about } : {}),
     experience,
     education,
     skills,
     certifications,
     languages,
-    profileImages: identity.profileImages,
+    profileImages: profilePage.profileImages,
     warnings,
   };
 }

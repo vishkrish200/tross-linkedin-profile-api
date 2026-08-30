@@ -4,6 +4,10 @@
 node_modules/
 dist/
 coverage/
+reports/
+tmp/
+.auth/
+*.log
 .env
 .env.*
 docs/codex-handoffs/

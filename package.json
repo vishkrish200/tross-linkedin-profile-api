@@ -12,6 +12,7 @@
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "smoke": "tsx scripts/smoke-profile.ts",
+    "smoke:matrix": "tsx scripts/smoke-matrix.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",

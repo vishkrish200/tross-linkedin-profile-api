@@ -29,7 +29,7 @@ describe("profile API", () => {
     const app = await buildApp({
       provider,
       accessMode: "bearer",
-      apiKey: "secret",
+      apiKeys: ["secret"],
       revision: "test-revision",
     });
 
@@ -290,7 +290,7 @@ describe("profile API", () => {
   );
 
   it("enforces the optional bearer token", async () => {
-    const app = await buildApp({ provider, apiKey: "secret" });
+    const app = await buildApp({ provider, apiKeys: ["secret"] });
     const response = await app.inject({
       method: "POST",
       url: "/v1/profiles",
@@ -319,7 +319,7 @@ describe("profile API", () => {
   it.each(["bearer secret", "BEARER   secret"])(
     "accepts the case-insensitive HTTP authentication scheme: %s",
     async (authorization) => {
-      const app = await buildApp({ provider, apiKey: "secret" });
+      const app = await buildApp({ provider, apiKeys: ["secret"] });
       const response = await app.inject({
         method: "POST",
         url: "/v1/profiles",
@@ -335,7 +335,7 @@ describe("profile API", () => {
   it("does not let unauthorized requests consume the authenticated quota", async () => {
     const app = await buildApp({
       provider,
-      apiKey: "secret",
+      apiKeys: ["secret"],
       rateLimitMax: 2,
       unauthorizedRateLimitMax: 2,
     });
@@ -356,7 +356,7 @@ describe("profile API", () => {
   });
 
   it("keeps health checks outside the profile quota", async () => {
-    const app = await buildApp({ provider, apiKey: "secret", rateLimitMax: 1 });
+    const app = await buildApp({ provider, apiKeys: ["secret"], rateLimitMax: 1 });
     for (let index = 0; index < 5; index += 1) {
       expect((await app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
     }
@@ -370,7 +370,7 @@ describe("profile API", () => {
   });
 
   it("normalizes authenticated quota errors", async () => {
-    const app = await buildApp({ provider, apiKey: "secret", rateLimitMax: 1 });
+    const app = await buildApp({ provider, apiKeys: ["secret"], rateLimitMax: 1 });
     const request = {
       method: "POST" as const,
       url: "/v1/profiles",
@@ -438,7 +438,7 @@ describe("profile API", () => {
 
   it("requires a JSON request content type after bearer authentication", async () => {
     const fetch = vi.fn(provider.fetch);
-    const app = await buildApp({ provider: { fetch }, apiKey: "secret" });
+    const app = await buildApp({ provider: { fetch }, apiKeys: ["secret"] });
     const response = await app.inject({
       method: "POST",
       url: "/v1/profiles",
@@ -459,7 +459,7 @@ describe("profile API", () => {
 
   it("rejects unauthorized traffic before parsing its request body", async () => {
     const fetch = vi.fn(provider.fetch);
-    const app = await buildApp({ provider: { fetch }, apiKey: "secret", bodyLimit: 1_024 });
+    const app = await buildApp({ provider: { fetch }, apiKeys: ["secret"], bodyLimit: 1_024 });
     const response = await app.inject({
       method: "POST",
       url: "/v1/profiles",

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { UpstreamRequestLimiter } from "../src/provider/upstream-request-limiter.js";
+import { LinkedInRequestLimiter } from "../src/linkedin/request-limiter.js";
 
-describe("UpstreamRequestLimiter", () => {
+describe("LinkedInRequestLimiter", () => {
   it("enforces both minimum spacing and a rolling request window", async () => {
     let now = 0;
     const waits: number[] = [];
-    const limiter = new UpstreamRequestLimiter(
+    const limiter = new LinkedInRequestLimiter(
       2,
       1_000,
       100,
@@ -24,7 +24,7 @@ describe("UpstreamRequestLimiter", () => {
 
   it("honors cancellation while waiting", async () => {
     const controller = new AbortController();
-    const limiter = new UpstreamRequestLimiter(
+    const limiter = new LinkedInRequestLimiter(
       1,
       1_000,
       0,
@@ -42,7 +42,7 @@ describe("UpstreamRequestLimiter", () => {
   it("honors cancellation while queued behind another limiter waiter", async () => {
     let now = 0;
     let releaseWait!: () => void;
-    const limiter = new UpstreamRequestLimiter(
+    const limiter = new LinkedInRequestLimiter(
       1,
       1_000,
       0,
@@ -64,8 +64,8 @@ describe("UpstreamRequestLimiter", () => {
   });
 
   it("rejects invalid limits", () => {
-    expect(() => new UpstreamRequestLimiter(0)).toThrow(RangeError);
-    expect(() => new UpstreamRequestLimiter(1, 0)).toThrow(RangeError);
-    expect(() => new UpstreamRequestLimiter(1, 1_000, -1)).toThrow(RangeError);
+    expect(() => new LinkedInRequestLimiter(0)).toThrow(RangeError);
+    expect(() => new LinkedInRequestLimiter(1, 0)).toThrow(RangeError);
+    expect(() => new LinkedInRequestLimiter(1, 1_000, -1)).toThrow(RangeError);
   });
 });

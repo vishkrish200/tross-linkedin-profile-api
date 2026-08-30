@@ -12,8 +12,9 @@ import {
   semanticValues,
   unique,
   type FlightRow,
-} from "./react-flight.js";
+} from "./react-flight-parser.js";
 
+// Shared entity-collection decoding used by LinkedIn's section pages.
 type EntityCollectionGroup = {
   semanticId: string;
   values: string[];
@@ -85,6 +86,8 @@ export function countDeclaredSectionItems(input: string): number {
   return ids.size;
 }
 
+// Certification credential links are joined by LinkedIn semantic identity,
+// never by array position.
 function credentialTarget(value: string): string | undefined {
   try {
     const redirect = new URL(value);
@@ -152,6 +155,7 @@ function credentialUrls(input: string): CredentialUrlIndex {
   return best;
 }
 
+// Experience and education parsing.
 function looksLikeDate(value: string | undefined): boolean {
   return Boolean(value && /(?:19|20)\d{2}|Present/i.test(value) && /[-–·]/.test(value));
 }
@@ -332,7 +336,7 @@ function mergeExperience(collection: Experience, flat: Experience | undefined): 
   };
 }
 
-export function extractExperience(input: string): Experience[] {
+export function parseExperienceSection(input: string): Experience[] {
   const parsed = semanticRows(input);
   const itemRows = parsed.values.filter((row) =>
     row.id !== "0"
@@ -375,7 +379,7 @@ export function extractExperience(input: string): Experience[] {
   return unique([...collectionExperience, ...unmatchedFlatExperience], experienceKey);
 }
 
-export function extractEducation(input: string): Education[] {
+export function parseEducationSection(input: string): Education[] {
   const collectionGroups = entityCollectionGroups(input);
   if (collectionGroups.length) {
     return unique(collectionGroups.map(({ values }): Education | undefined => {
@@ -445,6 +449,7 @@ export function extractEducation(input: string): Education[] {
   ].join("|"));
 }
 
+// Skills, certifications, and languages share LinkedIn's flatter list shape.
 function firstPageItemRows(input: string): FlightRow[] {
   const parsed = semanticRows(input);
   if (parsed.values.some((row) => row.values.includes("Nothing to see for now"))) return [];
@@ -473,11 +478,11 @@ function firstPageItemRows(input: string): FlightRow[] {
   return items;
 }
 
-export function extractSkills(input: string): string[] {
+export function parseSkillsSection(input: string): string[] {
   return firstPageItemRows(input).map((row) => row.values[0]!).filter(Boolean);
 }
 
-export function extractCertifications(input: string): Certification[] {
+export function parseCertificationsSection(input: string): Certification[] {
   const collectionGroups = entityCollectionGroups(input);
   const urls = credentialUrls(input);
   const items = collectionGroups.length
@@ -508,7 +513,7 @@ export function extractCertifications(input: string): Certification[] {
   });
 }
 
-export function extractLanguages(input: string): Language[] {
+export function parseLanguagesSection(input: string): Language[] {
   const collectionGroups = entityCollectionGroups(input);
   if (collectionGroups.length) {
     return collectionGroups.map(({ values: [name, proficiency] }) => ({

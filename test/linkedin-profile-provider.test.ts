@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { LinkedInApiProvider } from "../src/provider/linkedin-api-provider.js";
+import { LinkedInProfileProvider } from "../src/linkedin/profile-provider.js";
 import {
   ProviderAuthenticationError,
   ProviderFetchError,
@@ -62,10 +62,10 @@ function successfulFetch() {
   });
 }
 
-describe("LinkedInApiProvider", () => {
+describe("LinkedInProfileProvider", () => {
   it("calls the direct profile and RSC pagination endpoints with runtime session headers", async () => {
     const fetchImpl = successfulFetch();
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session-secret; JSESSIONID="ajax:csrf-secret"',
       baseUrl: "https://linkedin.example.test",
       fetchImpl,
@@ -114,7 +114,7 @@ describe("LinkedInApiProvider", () => {
       }
       return rscResponse(emptyFlight, { status: 200 });
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       baseUrl: "https://linkedin.example.test",
       fetchImpl,
@@ -150,7 +150,7 @@ describe("LinkedInApiProvider", () => {
       }
       return rscResponse(emptyFlight);
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       baseUrl: "https://linkedin.example.test",
       fetchImpl,
@@ -170,7 +170,7 @@ describe("LinkedInApiProvider", () => {
       }
       return rscResponse(emptyFlight);
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       baseUrl: "https://linkedin.example.test",
       fetchImpl,
@@ -185,7 +185,7 @@ describe("LinkedInApiProvider", () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       htmlResponse(lazyAboutShapeDriftProfileHtml, { status: 200 }),
     );
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
     });
@@ -199,7 +199,7 @@ describe("LinkedInApiProvider", () => {
 
   it("fails before network access when no session cookie is configured", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
-    const provider = new LinkedInApiProvider({ fetchImpl });
+    const provider = new LinkedInProfileProvider({ fetchImpl });
     await expect(provider.fetch("https://www.linkedin.com/in/example/")).rejects.toBeInstanceOf(
       ProviderNotConfiguredError,
     );
@@ -207,7 +207,7 @@ describe("LinkedInApiProvider", () => {
   });
 
   it.each([401, 403])("maps LinkedIn HTTP %s to the authentication error", async (status) => {
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=expired; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status })),
     });
@@ -219,7 +219,7 @@ describe("LinkedInApiProvider", () => {
   it.each(["/login?sessionExpired=1", "/checkpoint/challenge/"])(
     "maps an authentication redirect to the authentication error: %s",
     async (location) => {
-      const provider = new LinkedInApiProvider({
+      const provider = new LinkedInProfileProvider({
         cookie: 'li_at=expired; JSESSIONID="ajax:csrf"',
         fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
           new Response(null, { status: 302, headers: { location } }),
@@ -235,7 +235,7 @@ describe("LinkedInApiProvider", () => {
     const response = status === 999
       ? { status, ok: false, headers: new Headers() } as Response
       : new Response(null, { status });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(response),
     });
@@ -244,7 +244,7 @@ describe("LinkedInApiProvider", () => {
   });
 
   it("detects an authentication wall returned with HTTP 200", async () => {
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=expired; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
         new Response("<html><title>Sign in | LinkedIn</title><form class=\"login__form\"></form></html>"),
@@ -255,7 +255,7 @@ describe("LinkedInApiProvider", () => {
   });
 
   it("detects a challenge page returned with HTTP 200", async () => {
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
         new Response([
@@ -271,7 +271,7 @@ describe("LinkedInApiProvider", () => {
   });
 
   it("detects a consent wall returned with HTTP 200", async () => {
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
         htmlResponse([
@@ -296,7 +296,7 @@ describe("LinkedInApiProvider", () => {
       }
       return rscResponse(emptyFlight);
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -320,7 +320,7 @@ describe("LinkedInApiProvider", () => {
       }
       return rscResponse(emptyFlight);
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -339,7 +339,7 @@ describe("LinkedInApiProvider", () => {
         pagerId.endsWith(".skills") ? skillsPageFlight("authwall", 1) : emptyFlight,
       );
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -350,7 +350,7 @@ describe("LinkedInApiProvider", () => {
   });
 
   it("rejects an unexpected successful-response content type", async () => {
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
         new Response(profileHtml, { headers: { "content-type": "application/json" } }),
@@ -361,7 +361,7 @@ describe("LinkedInApiProvider", () => {
   });
 
   it("rejects a missing content type and malformed UTF-8", async () => {
-    const missingType = new LinkedInApiProvider({
+    const missingType = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
         new Response(new TextEncoder().encode(profileHtml)),
@@ -370,7 +370,7 @@ describe("LinkedInApiProvider", () => {
     await expect(missingType.fetch("https://www.linkedin.com/in/example/"))
       .rejects.toThrow("unexpected profile content type");
 
-    const malformed = new LinkedInApiProvider({
+    const malformed = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
         htmlResponse(new Uint8Array([0xc3, 0x28])),
@@ -381,7 +381,7 @@ describe("LinkedInApiProvider", () => {
   });
 
   it("rejects oversized and truncated successful responses", async () => {
-    const oversized = new LinkedInApiProvider({
+    const oversized = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       maxResponseBytes: 64,
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(htmlResponse(profileHtml)),
@@ -390,7 +390,7 @@ describe("LinkedInApiProvider", () => {
       .rejects.toThrow("exceeded the configured size limit");
 
     const byteLength = new TextEncoder().encode(profileHtml).byteLength;
-    const truncated = new LinkedInApiProvider({
+    const truncated = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(htmlResponse(profileHtml, {
         headers: { "content-length": String(byteLength + 10) },
@@ -407,7 +407,7 @@ describe("LinkedInApiProvider", () => {
         cancelled = true;
       },
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       maxResponseBytes: 64,
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(htmlResponse(body, {
@@ -426,7 +426,7 @@ describe("LinkedInApiProvider", () => {
         controller.error(new Error("upstream stream reset"));
       },
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(htmlResponse(body)),
     });
@@ -439,7 +439,7 @@ describe("LinkedInApiProvider", () => {
   });
 
   it("maps an upstream timeout to the non-retrying fetch error", async () => {
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockRejectedValue(new DOMException("The operation timed out", "TimeoutError")),
     });
@@ -450,7 +450,7 @@ describe("LinkedInApiProvider", () => {
   });
 
   it("classifies an HTTP 404 profile response as unavailable", async () => {
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 404 })),
     });
@@ -462,14 +462,14 @@ describe("LinkedInApiProvider", () => {
     const unavailableHtml = profileHtml
       .replaceAll("profile-example", "")
       .replace("</body>", "<p>This profile is not available.</p></body>");
-    const unavailable = new LinkedInApiProvider({
+    const unavailable = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(htmlResponse(unavailableHtml)),
     });
     await expect(unavailable.fetch("https://www.linkedin.com/in/unavailable-profile/"))
       .rejects.toBeInstanceOf(ProviderProfileUnavailableError);
 
-    const unknownShape = new LinkedInApiProvider({
+    const unknownShape = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
         htmlResponse(profileHtml.replaceAll("profile-example", "")),
@@ -494,7 +494,7 @@ describe("LinkedInApiProvider", () => {
         { status: 200 },
       );
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -516,7 +516,7 @@ describe("LinkedInApiProvider", () => {
       const start = Number(JSON.parse(String(init?.body)).clientArguments.payload.start);
       return rscResponse(start === 0 ? skillsPageFlight("page-one") : responseShapeDriftFlight);
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -538,7 +538,7 @@ describe("LinkedInApiProvider", () => {
         pagerId.endsWith(".skills") ? partiallyParsedSkillsFlight(10, 8) : emptyFlight,
       );
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -556,7 +556,7 @@ describe("LinkedInApiProvider", () => {
       const pagerId = url.searchParams.get("sduiid") ?? "";
       return rscResponse(pagerId.endsWith(".skills") ? repeated : emptyFlight);
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -579,7 +579,7 @@ describe("LinkedInApiProvider", () => {
       const start = Number(JSON.parse(String(init?.body)).clientArguments.payload.start);
       return rscResponse(skillsPageFlight(`page-${start / 10}`));
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -604,7 +604,7 @@ describe("LinkedInApiProvider", () => {
       const start = Number(JSON.parse(String(init?.body)).clientArguments.payload.start);
       return rscResponse(skillsPageFlight(`oversized-${start}`, 12));
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -643,7 +643,7 @@ describe("LinkedInApiProvider", () => {
         ? rscResponse(skillsPageFlight(`boundary-${start}`, count))
         : rscResponse(emptyFlight);
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -672,7 +672,7 @@ describe("LinkedInApiProvider", () => {
       }
       return rscResponse(emptyFlight);
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -690,7 +690,7 @@ describe("LinkedInApiProvider", () => {
         ? htmlResponse(profileHtml, { status: 200 })
         : rscResponse(emptyFlight, { status: 200 });
     });
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl,
       baseUrl: "https://linkedin.example.test",
@@ -708,7 +708,7 @@ describe("LinkedInApiProvider", () => {
   });
 
   it("rejects a successful profile page without LinkedIn's transient profile id", async () => {
-    const provider = new LinkedInApiProvider({
+    const provider = new LinkedInProfileProvider({
       cookie: 'li_at=session; JSESSIONID="ajax:csrf"',
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(
         new Response("<html><title>Example | LinkedIn</title></html>", { status: 200 }),
