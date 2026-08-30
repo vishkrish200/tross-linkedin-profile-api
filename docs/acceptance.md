@@ -45,15 +45,15 @@ All committed regression fixtures are synthetic and sanitized.
 
 ## Final submission release
 
-On August 30, source commit `c37db07` was deployed as Cloud Run revision `tross-linkedin-profile-api-c37db07` at 100% traffic. The final release added explicit public-demo access, uniform HTTP error envelopes, stronger bearer-key validation, and enforced release gates.
+On August 30, source commit `3d6cd21` was deployed as Cloud Run revision `tross-linkedin-profile-api-3d6cd21` at 100% traffic. The final release added explicit public-demo access, uniform HTTP error envelopes, stronger bearer-key validation, a bounded distinct-profile FIFO queue, and enforced release gates.
 
-- All 149 deterministic tests, TypeScript checks, zero-warning source lint, and both bearer/public-demo OpenAPI recommended lint passed.
-- Global test coverage was 94.22% statements, 85.64% branches, 96.95% functions, and 96.26% lines; CI enforces minimums of 90%, 80%, 90%, and 90% respectively.
-- `npm audit` reported zero vulnerabilities, the 22-commit Gitleaks history scan reported no leaks, and Trivy reported zero fixed high/critical findings in the final image.
+- All 155 deterministic tests, TypeScript checks, zero-warning source lint, and both bearer/public-demo OpenAPI recommended lint passed.
+- Global test coverage was 94.35% statements, 85.95% branches, 96.96% functions, and 96.39% lines; CI enforces minimums of 90%, 80%, 90%, and 90% respectively.
+- `npm audit` reported zero vulnerabilities, the full-history Gitleaks scan reported no leaks, and Trivy reported zero fixed high/critical findings in the final image.
 - The production image ran as the unprivileged `node` user and excluded unused `npm`/`npx` tooling from the runtime layer.
 - Live discovery, health, docs, and OpenAPI returned HTTP 200. Malformed JSON, unsupported media, and oversized bodies returned the documented `400`, `415`, and `413` envelopes.
-- One tokenless, privacy-minimized production canary returned HTTP 200 with core identity fields, About, experience, education, skills, and profile images present, with no parser warning or protection signal.
-- Cloud Run reported ready status, 100% traffic on the final revision, service- and revision-level maximum instance counts of one, concurrency 10, timeout 30 seconds, and the documented automatic public-demo expiry.
+- A 100-request same-profile production burst launched all requests together and returned 100/100 HTTP 200 responses in 5.9 seconds, all with structured data and no error or protection signal. Cache/coalescing and queue behavior is covered separately by deterministic tests so raw profile content was not retained.
+- Cloud Run reported ready status, 100% traffic on the final revision, service- and revision-level maximum instance counts of one, concurrency 10, timeout 30 seconds, a four-request distinct-profile queue, 120/client and 180/global minute-level ingress limits, a 100-start cold-extraction cap, and the documented automatic public-demo expiry.
 
 ## Deterministic failure contract
 
